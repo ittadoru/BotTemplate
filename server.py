@@ -1,11 +1,8 @@
-import asyncio
-import os
-import traceback
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from aiogram import types, Bot
+from aiogram import Bot
 
 from redis_db import r
 from redis_db.subscribers import add_subscriber_with_duration
