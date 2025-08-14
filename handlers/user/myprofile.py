@@ -1,7 +1,8 @@
 from aiogram import Router, types
 from aiogram.types import CallbackQuery
 from datetime import datetime
-from redis_db import r
+from db.base import get_session
+from db.subscribers import get_subscriber_expiry
 
 
 router = Router()
@@ -17,12 +18,11 @@ async def show_profile(callback: CallbackQuery):
         return
 
     # Получение информации о пользователе
-    expire_timestamp = await r.get(f"subscriber:expire:{user_id}")
-    if expire_timestamp:
-        expire_timestamp = int(expire_timestamp)
-        expiry_date = datetime.fromtimestamp(expire_timestamp)
-        if expiry_date > datetime.now():
-            subscription_status = f"✅ Подписка активна до <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>"
+    async with get_session() as session:
+        expire_at = await get_subscriber_expiry(session, user_id)
+    if expire_at:
+        if expire_at > datetime.now(expire_at.tzinfo):
+            subscription_status = f"✅ Подписка активна до <b>{expire_at.strftime('%d.%m.%Y %H:%M')}</b>"
         else:
             subscription_status = "❌ Подписка истекла"
     else:

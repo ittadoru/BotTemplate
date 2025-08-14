@@ -3,8 +3,8 @@ from aiogram import Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 import payment
-from redis_db.subscribers import add_subscriber_with_duration
-from redis_db.tariff import get_tariff_by_id
+from db.subscribers import add_subscriber_with_duration
+from db.tariff import get_tariff_by_id
 from utils import logger as log  # твоя функция логирования
 
 async def _handle_user_payment(user_id: int, tariff):

@@ -1,8 +1,8 @@
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
-from redis_db.subscribers import add_promocode
-from redis_db.users import add_user
-from redis_db import r
+from db.base import get_session
+from db.subscribers import add_promocode
+from db.users import add_user, is_user_exists
 import random
 
 router = Router()
@@ -14,8 +14,9 @@ async def cmd_start(message: types.Message, bot: Bot):
     Проверяет, новый ли пользователь, и добавляет его в базу данных.
     Если пользователь новый, генерирует уникальный промокод на 7 дней подписки.
     """
-    is_new = not await r.sismember("users", message.from_user.id)
-    await add_user(message.from_user, bot)
+    async with get_session() as session:
+        is_new = not await is_user_exists(session, message.from_user.id)
+        await add_user(session, message.from_user.id, first_name=message.from_user.first_name, username=message.from_user.username)
     username = message.from_user.username or message.from_user.full_name or "пользователь"
 
     if is_new:

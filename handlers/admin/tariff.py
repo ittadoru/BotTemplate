@@ -2,7 +2,8 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from states.tariff import TariffStates
-from redis_db.tariff import create_tariff, delete_tariff, get_all_tariffs
+from db.tariff import create_tariff, delete_tariff, get_all_tariffs
+from db.base import get_session
 from config import ADMINS
 import logging
 
@@ -29,32 +30,34 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "remove_tariff")
 async def show_tariffs_for_removal(callback: CallbackQuery):
     """Показывает список тарифов для удаления."""
-    tariffs = await get_all_tariffs()
-    if not tariffs:
-        await callback.message.edit_text("Список тарифов пуст.")
-        await callback.answer()
-        return
-    # Формируем клавиатуру с тарифами для удаления
-    buttons = [
-        InlineKeyboardButton(
-            text=f"{t.name} ({t.duration_days} дней, {t.price} ₽) ❌",
-            callback_data=f"delete_tariff:{t.id}"
-        ) for t in tariffs 
-    ]
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            buttons,
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="tariff_menu")]
+    async with get_session() as session:
+        tariffs = await get_all_tariffs(session)
+        if not tariffs:
+            await callback.message.edit_text("Список тарифов пуст.")
+            await callback.answer()
+            return
+        # Формируем клавиатуру с тарифами для удаления
+        buttons = [
+            InlineKeyboardButton(
+                text=f"{t.name} ({t.duration_days} дней, {t.price} ₽) ❌",
+                callback_data=f"delete_tariff:{t.id}"
+            ) for t in tariffs 
         ]
-    )
-    await callback.message.edit_text("Выберите тариф для удаления:", reply_markup=keyboard)
-    await callback.answer()
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                buttons,
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="tariff_menu")]
+            ]
+        )
+        await callback.message.edit_text("Выберите тариф для удаления:", reply_markup=keyboard)
+        await callback.answer()
 
 @router.callback_query(F.data.startswith("delete_tariff:"))
 async def delete_tariff_handler(callback: CallbackQuery):
     """Удаляет выбранный тариф и обновляет список."""
     tariff_id = int(callback.data.split(":")[1])
-    await delete_tariff(tariff_id)
+    async with get_session() as session:
+        await delete_tariff(session, tariff_id)
     logging.info(f"Admin {callback.from_user.id} deleted tariff {tariff_id}")
     await callback.answer("Тариф удалён.")
     # Обновляем список тарифов после удаления
@@ -88,8 +91,8 @@ async def process_tariff_price(message: Message, state: FSMContext):
     name = data["name"]
     days = data["days"]
 
-    # Создаём тариф в Redis
-    await create_tariff(name=name, price=price, duration_days=days)
+    async with get_session() as session:
+        await create_tariff(session, name=name, price=price, duration_days=days)
     logging.info(f"Admin {message.from_user.id} created tariff '{name}' ({days} days, {price} RUB)")
 
     await message.answer(f"✅ Тариф «{name}» добавлен: {days} дней, {price} RUB.")

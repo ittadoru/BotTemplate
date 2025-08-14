@@ -2,7 +2,7 @@ from aiogram import Router, types
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from redis_db.subscribers import get_all_promocodes, remove_promocode, add_promocode, remove_all_promocodes
+from db.subscribers import get_all_promocodes, remove_promocode, add_promocode, remove_all_promocodes
 from utils import logger as log
 from config import ADMINS
 from states.promo import PromoStates

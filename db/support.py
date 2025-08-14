@@ -3,14 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import relationship
 from db.base import Base
-from datetime import datetime
-from typing import Optional
+
 
 class SupportTicket(Base):
     __tablename__ = 'support_tickets'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, nullable=False)
     username = Column(String, nullable=True)
+    topic_id = Column(Integer, nullable=True, index=True)  # message_thread_id для поддержки
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     messages = relationship('SupportMessage', back_populates='ticket', cascade='all, delete-orphan')
 
@@ -59,3 +59,19 @@ async def close_ticket(session: AsyncSession, user_id: int):
     if ticket:
         await session.delete(ticket)
         await session.commit()
+
+async def get_user_id_by_topic(session, topic_id: int) -> int | None:
+    """
+    Получить user_id по topic_id (message_thread_id).
+    Требует, чтобы в SupportTicket было поле topic_id.
+    """
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.topic_id == topic_id))
+    ticket = ticket.scalars().first()
+    return ticket.user_id if ticket else None
+
+async def get_ticket(session, user_id: int):
+    """
+    Получить SupportTicket по user_id.
+    """
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id))
+    return ticket.scalars().first()

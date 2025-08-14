@@ -1,22 +1,24 @@
 from aiogram import Router, types
 from aiogram.types import CallbackQuery
-from redis.exceptions import RedisError
 import datetime
 
 from utils import logger as log
 from config import ADMIN_ERROR
-from redis_db import r
+from db.base import get_session
+from db.users import get_total_users, get_active_users_today
+from db.subscribers import get_total_subscribers
+
 
 router = Router()
 
-
 @router.callback_query(lambda c: c.data == "stats")
 async def handle_stats(callback: CallbackQuery):
+
     try:
-        total_users = await r.scard("users")
-        today_key = f"active_users:{datetime.date.today()}"
-        active_users_today = await r.pfcount(today_key)
-        total_subscribers = len(await r.smembers("subscribers"))
+        async with get_session() as session:
+            total_users = await get_total_users(session)
+            total_subscribers = await get_total_subscribers(session)
+            active_users_today = await get_active_users_today(session)
     except Exception as e:
         log.log_error(f"Ошибка при получении статистики: {e}")
         await callback.message.answer("⚠️ Ошибка при получении статистики.")

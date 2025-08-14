@@ -4,9 +4,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from aiogram import Bot
 
-from redis_db import r
-from redis_db.subscribers import add_subscriber_with_duration
-from redis_db.tariff import get_tariff_by_id
+from db.subscribers import add_subscriber_with_duration
+from db.tariff import get_tariff_by_id
 from utils import logger as log
 from config import BOT_TOKEN, SUPPORT_GROUP_ID, SUBSCRIBE_TOPIC_ID, ADMIN_ERROR
  
@@ -108,4 +107,3 @@ async def on_startup():
     """
     log.log_message("Запуск FastAPI приложения", emoji="🚀")
     app.state.bot = Bot(token=BOT_TOKEN)
-    app.state.redis = r

@@ -1,10 +1,13 @@
 from aiogram import types, Router
 from aiogram.fsm.context import FSMContext
-
-from redis_db import r
 from states.history import HistoryStates
 from datetime import datetime
 from utils import logger as log
+from db.base import get_session
+from db.users import get_all_user_ids
+from db.subscribers import Subscriber
+from db.users import User
+
 
 router = Router()
 
@@ -33,18 +36,18 @@ async def process_id_or_username(message: types.Message, state: FSMContext):
     arg = message.text.strip()
     user_id = None
 
-    if arg.isdigit():
-        user_id = int(arg)
-    else:
-        # Поиск по username (без @, в нижнем регистре)
-        username = arg.lstrip("@").lower()
-        user_ids = await r.smembers("users")
-
-        for uid in user_ids:
-            data = await r.hgetall(f"user:{uid}")
-            if data.get("username", "").lower() == username:
-                user_id = int(uid)
-                break
+    async with get_session() as session:
+        if arg.isdigit():
+            user_id = int(arg)
+        else:
+            # Поиск по username (без @, в нижнем регистре)
+            username = arg.lstrip("@").lower()
+            user_ids = await get_all_user_ids(session)
+            for uid in user_ids:
+                user = await session.get(User, int(uid))
+                if user and user.username and user.username.lower() == username:
+                    user_id = int(uid)
+                    break
 
     # Если пользователь не найден
     if user_id is None:
@@ -52,21 +55,27 @@ async def process_id_or_username(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    # Получение информации о пользователе
-    user_data = await r.hgetall(f"user:{user_id}")
-    expire_timestamp = await r.get(f"subscriber:expire:{user_id}")
-    if expire_timestamp:
-        expire_timestamp = int(expire_timestamp)
-        expiry_date = datetime.fromtimestamp(expire_timestamp)
-        if expiry_date > datetime.now():
-            subscription_status = f"✅ Подписка активна до <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>"
-        else:
-            subscription_status = "❌ Подписка истекла"
-    else:
-        subscription_status = "❌ Подписка не активна"
 
-    name = user_data.get("first_name", "")
-    username = user_data.get("username", "")
+    async with get_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            await message.answer("❌ Пользователь не найден.")
+            await state.clear()
+            return
+
+        # Получение информации о подписке
+        subscriber = await session.get(Subscriber, user_id)
+        if subscriber and subscriber.expires_at:
+            expiry_date = subscriber.expires_at
+            if expiry_date > datetime.now():
+                subscription_status = f"✅ Подписка активна до <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>"
+            else:
+                subscription_status = "❌ Подписка истекла"
+        else:
+            subscription_status = "❌ Подписка не активна"
+
+        name = user.first_name or ""
+        username = user.username or ""
 
     user_info = "<b>👤 Пользователь:</b>\n\n"
     user_info += f"ID: <code>{user_id}</code>\n"
@@ -86,15 +95,18 @@ async def process_id_or_username(message: types.Message, state: FSMContext):
     await message.answer(user_info, parse_mode="HTML", reply_markup=keyboard)
     await state.clear()
 
-@router.callback_query(lambda c: c.data.startswith("delete_user:"))
-async def delete_user_callback(callback: types.CallbackQuery):
-    uid = callback.data.split(":")[1]
 
-    # Удаляем пользователя из всех связанных структур
-    await r.srem("users", uid)
-    await r.srem("subscribers", uid)
-    await r.delete(f"user:{uid}")
-    await r.delete(f"user:busy:{uid}")
+async def delete_user_callback(callback: types.CallbackQuery):
+    uid = int(callback.data.split(":")[1])
+
+    async with get_session() as session:
+        user = await session.get(User, uid)
+        if user:
+            await session.delete(user)
+        subscriber = await session.get(Subscriber, uid)
+        if subscriber:
+            await session.delete(subscriber)
+        await session.commit()
 
     await callback.message.answer(f"Пользователь {uid} удалён", show_alert=True)
     log.log_message(f"Админ удалил пользователя {uid}", emoji="🗑️")

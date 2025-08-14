@@ -3,9 +3,10 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 
 from states.broadcast import Broadcast
-from redis_db import r
 from config import ADMIN_ERROR
 from utils import logger as log
+from db.users import get_all_user_ids
+from db.base import get_session
 
 router = Router()
 
@@ -16,8 +17,6 @@ async def start_broadcast(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✉️ Пришлите сообщение для рассылки.")
     await state.set_state(Broadcast.waiting_for_message)
     await callback.answer()
-
-
 
 # Шаг 1: Получаем текст рассылки
 @router.message(Broadcast.waiting_for_message)
@@ -48,7 +47,6 @@ async def process_button_text(message: Message, state: FSMContext):
     await state.set_state(Broadcast.waiting_button_url)
 
 # Шаг 4: Получаем ссылку для кнопки и отправляем рассылку
-
 @router.message(Broadcast.waiting_button_url)
 async def process_button_url(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -70,31 +68,32 @@ async def process_button_url(message: Message, state: FSMContext):
 
 # Функция рассылки
 async def send_broadcast(message: Message, text: str, markup: InlineKeyboardMarkup = None):
-    user_ids = await r.smembers("users")
-    sent = 0
+    async for session in get_session():
+        user_ids = await get_all_user_ids(session)
+        sent = 0
 
-    log.log_message(
-        f"Начата рассылка: {text or '[не текстовое сообщение]'}",
-        emoji="📢"
-    )
+        log.log_message(
+            f"Начата рассылка: {text or '[не текстовое сообщение]'}",
+            emoji="📢"
+        )
 
-    for uid in user_ids:
-        try:
-            await message.bot.send_message(int(uid), text, reply_markup=markup)
-            sent += 1
-        except Exception as e:
-            # Ловим TelegramBadRequest и другие ошибки
-            await message.bot.send_message(
-                ADMIN_ERROR, f"Ошибка при отправке рассылки пользователю {uid}: {e}"
-            )
-            log.log_error(f"Ошибка при отправке рассылки пользователю {uid}: {e}")
+        for uid in user_ids:
+            try:
+                await message.bot.send_message(int(uid), text, reply_markup=markup)
+                sent += 1
+            except Exception as e:
+                # Ловим TelegramBadRequest и другие ошибки
+                await message.bot.send_message(
+                    ADMIN_ERROR, f"Ошибка при отправке рассылки пользователю {uid}: {e}"
+                )
+                log.log_error(f"Ошибка при отправке рассылки пользователю {uid}: {e}")
 
-    log.log_message(
-        f"Рассылка завершена. Отправлено {sent} пользователям.",
-        emoji="📬"
-    )
+        log.log_message(
+            f"Рассылка завершена. Отправлено {sent} пользователям.",
+            emoji="📬"
+        )
 
-    await message.answer(f"✅ Отправлено {sent} пользователям.")
+        await message.answer(f"✅ Отправлено {sent} пользователям.")
 
 
 @router.callback_query(lambda c: c.data == "admin_menu")

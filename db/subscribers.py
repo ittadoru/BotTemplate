@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, DateTime, String, ForeignKey
+from sqlalchemy import Column, Integer, DateTime, String, ForeignKey, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from db.base import Base
 from datetime import datetime, timedelta
 
@@ -68,3 +67,25 @@ async def activate_promocode(session: AsyncSession, user_id: int, code: str):
     await add_subscriber_with_duration(session, user_id, promocode.duration_days)
     await remove_promocode(session, code)
     return promocode.duration_days
+
+async def get_total_subscribers(session):
+    return await session.scalar(select(func.count()).select_from(Subscriber))
+
+async def delete_subscriber_by_id(session, user_id: int):
+    subscriber = await session.get(Subscriber, user_id)
+    if subscriber:
+        await session.delete(subscriber)
+
+async def get_subscriber_expiry(session: AsyncSession, user_id: int):
+    """Возвращает expire_at (datetime) для подписчика или None."""
+    subscriber = await session.get(Subscriber, user_id)
+    if subscriber:
+        return subscriber.expire_at
+    return None
+
+async def get_promocode_duration(session: AsyncSession, code: str):
+    """Возвращает количество дней действия промокода по коду или None."""
+    promocode = await session.get(Promocode, code)
+    if promocode:
+        return promocode.duration_days
+    return None

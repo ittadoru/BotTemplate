@@ -12,3 +12,4 @@ SUBSCRIBE_TOPIC_ID = int(os.getenv("SUBSCRIBE_TOPIC_ID"))  # ID темы для 
 SHOP_ID = int(os.getenv("SHOP_ID"))  # ID магазина
 API_KEY = os.getenv("API_KEY")  # API ключ для магазина
 DOMAIN = os.getenv("DOMAIN") # Домен
+DATABASE_URL = os.getenv("DATABASE_URL")  # URL базы данных

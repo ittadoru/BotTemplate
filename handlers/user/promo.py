@@ -1,7 +1,7 @@
 from aiogram import Router, types
 from aiogram.fsm.context import FSMContext
-from redis_db.subscribers import activate_promocode
-from redis_db import r
+from db.base import get_session
+from db.subscribers import activate_promocode, get_promocode_duration
 from utils import logger as log
 from states.promo import PromoStates
 
@@ -15,9 +15,10 @@ async def promo_start(callback: types.CallbackQuery, state: FSMContext):
 @router.message(PromoStates.user)
 async def process_user_promocode(message: types.Message, state: FSMContext):
     code = message.text.strip()
-    duration = await r.hget("promocodes", code)
+    async with get_session() as session:
+        duration = await get_promocode_duration(session, code)
     result = await activate_promocode(message.from_user.id, code)
-    
+
     if result and duration:
         log.log_message(
             f"Пользователь {message.from_user.username} ({message.from_user.id}) активировал промокод {code}",
@@ -30,5 +31,5 @@ async def process_user_promocode(message: types.Message, state: FSMContext):
             emoji="❌"
         )
         await message.answer("⚠️ Промокод не найден или уже был использован. Проверьте правильность и попробуйте снова.")
-    
+
     await state.clear()

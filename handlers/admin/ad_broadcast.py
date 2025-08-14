@@ -1,12 +1,12 @@
-
 from aiogram import Router
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from config import ADMIN_ERROR
 from states.ad_broadcast import AdBroadcastStates
-import redis_db as redis
-from redis_db.subscribers import get_all_subscribers
+from db.subscribers import get_all_subscribers
+from db.users import get_all_user_ids
+from db.base import get_session
 from utils import logger as log
 
 
@@ -67,23 +67,25 @@ async def process_button_url(message: Message, state: FSMContext):
 
 # Функция рассылки
 async def send_broadcast(message: Message, text: str, markup: InlineKeyboardMarkup = None):
-    user_ids = await redis.r.smembers("users")
-    subscribers = await get_all_subscribers()
-    count_sent = 0
+    async for session in get_session():
+        user_ids = await get_all_user_ids(session)
+        subscribers = await get_all_subscribers(session)
+        subscriber_ids = {s.user_id for s in subscribers}
+        count_sent = 0
 
-    for uid in user_ids:
-        if str(uid) not in subscribers:
-            try:
-                await message.bot.send_message(uid, text, reply_markup=markup)
-                count_sent += 1
-            except Exception as e:
-                await message.bot.send_message(ADMIN_ERROR, f"Ошибка отправки пользователю {uid}: {e}")
-                log.log_error(f"Ошибка отправки пользователю {uid}: {e}")
+        for uid in user_ids:
+            if uid not in subscriber_ids:
+                try:
+                    await message.bot.send_message(uid, text, reply_markup=markup)
+                    count_sent += 1
+                except Exception as e:
+                    await message.bot.send_message(ADMIN_ERROR, f"Ошибка отправки пользователю {uid}: {e}")
+                    log.log_error(f"Ошибка отправки пользователю {uid}: {e}")
 
-    await message.reply(
-        f"📢 Рекламная рассылка отправлена {count_sent} пользователям (не подписчикам)."
-    )
-    log.log_message(
-        f"Рекламная рассылка отправлена {count_sent} пользователям (не подписчикам).",
-        emoji="📢"
-    )
+        await message.reply(
+            f"📢 Рекламная рассылка отправлена {count_sent} пользователям (не подписчикам)."
+        )
+        log.log_message(
+            f"Рекламная рассылка отправлена {count_sent} пользователям (не подписчикам).",
+            emoji="📢"
+        )
