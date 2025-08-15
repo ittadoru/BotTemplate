@@ -46,7 +46,7 @@ async def get_total_users(session):
 
 async def get_active_users_today(session):
     today = datetime.date.today()
-    q = select(func.count(func.distinct(UserActivity.user_id))).where(func.date(UserActivity.timestamp) == today)
+    q = select(func.count(func.distinct(UserActivity.user_id))).where(func.date(UserActivity.activity_date) == today)
     return await session.scalar(q)
 
 async def delete_user_by_id(session, user_id: int):

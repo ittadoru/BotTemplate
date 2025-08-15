@@ -5,7 +5,7 @@ from states.tariff import TariffStates
 from db.tariff import create_tariff, delete_tariff, get_all_tariffs
 from db.base import get_session
 from config import ADMINS
-import logging
+from utils import logger as log
 
 router = Router()
 
@@ -33,7 +33,10 @@ async def show_tariffs_for_removal(callback: CallbackQuery):
     async with get_session() as session:
         tariffs = await get_all_tariffs(session)
         if not tariffs:
-            await callback.message.edit_text("Список тарифов пуст.")
+            await callback.message.edit_text("Список тарифов пуст.", 
+                                             keyboard=InlineKeyboardMarkup(inline_keyboard=[
+                                             [InlineKeyboardButton(text="⬅️ Назад", callback_data="tariff_menu")]
+                                          ]))
             await callback.answer()
             return
         # Формируем клавиатуру с тарифами для удаления
@@ -58,7 +61,7 @@ async def delete_tariff_handler(callback: CallbackQuery):
     tariff_id = int(callback.data.split(":")[1])
     async with get_session() as session:
         await delete_tariff(session, tariff_id)
-    logging.info(f"Admin {callback.from_user.id} deleted tariff {tariff_id}")
+    log.log_message(f"Admin {callback.from_user.id} deleted tariff {tariff_id}")
     await callback.answer("Тариф удалён.")
     # Обновляем список тарифов после удаления
     await show_tariffs_for_removal(callback)
@@ -93,7 +96,7 @@ async def process_tariff_price(message: Message, state: FSMContext):
 
     async with get_session() as session:
         await create_tariff(session, name=name, price=price, duration_days=days)
-    logging.info(f"Admin {message.from_user.id} created tariff '{name}' ({days} days, {price} RUB)")
+    log.log_message(f"Admin {message.from_user.id} created tariff '{name}' ({days} days, {price} RUB)")
 
     await message.answer(f"✅ Тариф «{name}» добавлен: {days} дней, {price} RUB.")
     await state.clear()

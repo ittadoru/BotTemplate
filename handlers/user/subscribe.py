@@ -2,6 +2,7 @@ from aiogram import Router, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from utils.payment import create_payment
 from db.tariff import get_all_tariffs, get_tariff_by_id
+from db.base import get_session
 
 
 router = Router()
@@ -18,8 +19,9 @@ async def subscribe_handler(callback: types.CallbackQuery):
         "Выберите вариант подписки:"
     )
 
-    
-    tariffs = await get_all_tariffs()
+    async with get_session() as session:
+        tariffs = await get_all_tariffs(session)
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=f"{tariff.name} — {tariff.price} RUB",
@@ -48,8 +50,9 @@ async def payment_callback_handler(callback: types.CallbackQuery):
         await callback.answer("Некорректный тариф.", show_alert=True)
         return
 
-    # Получаем тариф из Redis
-    tariff = await get_tariff_by_id(tariff_id)
+
+    async with get_session() as session:
+        tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff:
         await callback.answer("Тариф не найден.", show_alert=True)
         return

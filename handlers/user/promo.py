@@ -14,10 +14,11 @@ async def promo_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(PromoStates.user)
 async def process_user_promocode(message: types.Message, state: FSMContext):
+
     code = message.text.strip()
     async with get_session() as session:
         duration = await get_promocode_duration(session, code)
-    result = await activate_promocode(message.from_user.id, code)
+        result = await activate_promocode(session, message.from_user.id, code)
 
     if result and duration:
         log.log_message(

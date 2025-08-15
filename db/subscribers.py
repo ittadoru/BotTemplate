@@ -1,7 +1,7 @@
-from sqlalchemy import Column, Integer, DateTime, String, ForeignKey, select, func
+from sqlalchemy import Column, Integer, DateTime, String, ForeignKey, select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import Base
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 class Subscriber(Base):
     __tablename__ = 'subscribers'
@@ -16,7 +16,7 @@ class Promocode(Base):
 # --- Подписки ---
 async def add_subscriber_with_duration(session: AsyncSession, user_id: int, days: int):
     subscriber = await session.get(Subscriber, user_id)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if subscriber and subscriber.expire_at > now:
         new_expire = subscriber.expire_at + timedelta(days=days)
         subscriber.expire_at = new_expire
@@ -32,7 +32,7 @@ async def add_subscriber_with_duration(session: AsyncSession, user_id: int, days
 
 async def is_subscriber(session: AsyncSession, user_id: int) -> bool:
     subscriber = await session.get(Subscriber, user_id)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return subscriber is not None and subscriber.expire_at > now
 
 async def get_all_subscribers(session: AsyncSession):
@@ -53,7 +53,7 @@ async def remove_promocode(session: AsyncSession, code: str):
         await session.commit()
 
 async def remove_all_promocodes(session: AsyncSession):
-    await session.execute('DELETE FROM promocodes')
+    await session.execute(text('DELETE FROM promocodes'))
     await session.commit()
 
 async def get_all_promocodes(session: AsyncSession):

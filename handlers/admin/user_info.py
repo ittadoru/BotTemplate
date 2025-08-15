@@ -65,9 +65,10 @@ async def process_id_or_username(message: types.Message, state: FSMContext):
 
         # Получение информации о подписке
         subscriber = await session.get(Subscriber, user_id)
-        if subscriber and subscriber.expires_at:
-            expiry_date = subscriber.expires_at
-            if expiry_date > datetime.now():
+        if subscriber and subscriber.expire_at:
+            expiry_date = subscriber.expire_at
+            now = datetime.now(expiry_date.tzinfo)
+            if expiry_date > now:
                 subscription_status = f"✅ Подписка активна до <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>"
             else:
                 subscription_status = "❌ Подписка истекла"

@@ -20,7 +20,7 @@ async def handle_stats(callback: CallbackQuery):
             total_subscribers = await get_total_subscribers(session)
             active_users_today = await get_active_users_today(session)
     except Exception as e:
-        log.log_error(f"Ошибка при получении статистики: {e}")
+        log.log_error(e, context="handle_stats")
         await callback.message.answer("⚠️ Ошибка при получении статистики.")
         await callback.message.bot.send_message(ADMIN_ERROR, f"Ошибка при получении статистики: {e}")
         return await callback.answer()

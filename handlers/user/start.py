@@ -22,7 +22,7 @@ async def cmd_start(message: types.Message, bot: Bot):
     if is_new:
         # Генерируем уникальный промокод для нового пользователя
         promo_code = f"WELCOME-{random.randint(100000, 999999)}"
-        await add_promocode(promo_code, duration_days=7)
+        await add_promocode(session, promo_code, duration_days=7)
         promo_text = (
             f"В подарок тебе промокод на 7 дней подписки: <pre>{promo_code}</pre>\n"
             "Активируй его через меню профиля, нажми на команду /profile.\n\n"

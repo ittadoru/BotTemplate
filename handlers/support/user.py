@@ -6,7 +6,9 @@ from config import SUPPORT_GROUP_ID
 from states.support import Support
 from utils import logger as log
 from db.base import get_session
-from db.support import create_ticket, get_ticket, close_ticket
+from db.support import create_ticket, get_ticket, close_ticket, SupportTicket
+from sqlalchemy.future import select
+
 
 router = Router()
 
@@ -21,32 +23,36 @@ async def start_support(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     username = callback.from_user.username or ""
     async with get_session() as session:
-        ticket = await get_ticket(session, user_id)
-        status = getattr(ticket, "status", "open") if ticket else None
-        if ticket and status == "open":
-            await callback.message.answer(
-                "У вас уже открыт чат с поддержкой. Напишите сообщение."
-            )
+        ticket = await session.execute(
+            select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0)
+        )
+        ticket = ticket.scalars().first()
+        bot = callback.message.bot
+        topic_id = None
+        if ticket and getattr(ticket, "topic_id", None):
+            topic_id = ticket.topic_id
         else:
-            # Создаём тикет и тему, если нужно
-            await create_ticket(session, user_id, username, "Открыт тикет")
-            ticket = await get_ticket(session, user_id)
-            topic_id = getattr(ticket, "topic_id", None)
-            log.log_message(
-                f"Открыт чат поддержки для @{username or 'Без username'} | id={user_id}",
-                emoji="💬"
-            )
-            await callback.message.answer(
-                "🆘 Чат с поддержкой открыт!\n"
-                "Чтобы завершить диалог, нажмите на /stop.\n"
-                "Пока чат открыт, бот не будет реагировать на другие команды."
-            )
-            await callback.message.bot.send_message(
+            # Создаём новую тему с user_id
+            new_topic = await bot.create_forum_topic(chat_id=SUPPORT_GROUP_ID, name=str(user_id))
+            topic_id = new_topic.message_thread_id
+            # Создаём тикет с topic_id
+            ticket = await create_ticket(session, user_id, username, topic_id)
+        log.log_message(
+            f"Открыт чат поддержки для @{username or 'Без username'} | id={user_id}",
+            emoji="💬"
+        )
+        await callback.message.answer(
+            "🆘 Чат с поддержкой открыт!\n"
+            "Чтобы завершить диалог, нажмите на /stop.\n"
+            "Пока чат открыт, бот не будет реагировать на другие команды."
+        )
+        if topic_id:
+            await bot.send_message(
                 SUPPORT_GROUP_ID,
                 f"👤 Новый тикет: @{username or 'Без username'} | {user_id}\nДиалог открыт.",
                 message_thread_id=topic_id
             )
-        await state.set_state(Support.waiting_for_message)
+    await state.set_state(Support.waiting_for_message)
 
 
 @router.message(Command("stop"), Support.waiting_for_message)
@@ -58,20 +64,24 @@ async def stop_support(message: Message, state: FSMContext):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     async with get_session() as session:
-        ticket = await get_ticket(session, user_id)
-        status = getattr(ticket, "status", "open") if ticket else None
-        if ticket and status == "open":
+        ticket = await session.execute(
+            select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0)
+        )
+        ticket = ticket.scalars().first()
+        if ticket:
             await close_ticket(session, user_id)
             log.log_message(
                 f"Пользователь @{username or 'Без username'} | id={user_id} закрыл чат поддержки",
                 emoji="🔒"
             )
             await message.answer("Диалог с поддержкой завершён. Бот снова доступен для скачивания видео.")
-            await message.bot.send_message(
-                SUPPORT_GROUP_ID,
-                "❌ Пользователь завершил диалог.",
-                message_thread_id=getattr(ticket, "topic_id", None)
-            )
+            topic_id = getattr(ticket, "topic_id", None)
+            if topic_id:
+                await message.bot.send_message(
+                    SUPPORT_GROUP_ID,
+                    "❌ Пользователь завершил диалог.",
+                    message_thread_id=topic_id
+                )
         else:
             await message.answer("У вас нет открытого диалога с поддержкой.")
         await state.clear()
@@ -86,13 +96,19 @@ async def forward_to_support(message: Message, state: FSMContext):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     async with get_session() as session:
-        ticket = await get_ticket(session, user_id)
-        status = getattr(ticket, "status", "open") if ticket else None
-        if not ticket or status != "open":
+        ticket = await session.execute(
+            select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0)
+        )
+        ticket = ticket.scalars().first()
+        if not ticket:
             await message.answer("У вас нет открытого диалога с поддержкой. Напишите /help для начала.")
             await state.clear()
             return
         topic_id = getattr(ticket, "topic_id", None)
+        if not topic_id:
+            await message.answer("❗️ Не удалось найти тему поддержки. Попробуйте начать чат заново через /help.")
+            await state.clear()
+            return
         try:
             # Пересылаем текстовое сообщение
             if message.text:

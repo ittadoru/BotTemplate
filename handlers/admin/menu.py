@@ -57,7 +57,7 @@ async def manage_users_menu(callback: CallbackQuery):
     """Меню управления пользователями."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Все пользователи", callback_data="all_users")],
-        [InlineKeyboardButton(text="🔍 История пользователя", callback_data="user_history_start")],
+        [InlineKeyboardButton(text="🔍 Данные пользователя", callback_data="user_history_start")],
         [InlineKeyboardButton(text="🗑️ Удалить всех пользователей", callback_data="delete_all_users")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu")]
     ])

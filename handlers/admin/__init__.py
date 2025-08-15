@@ -2,7 +2,7 @@ from .menu import router as menu_router
 from .stats import router as stats_router
 from .users import router as users_router
 from .broadcast import router as broadcast_router
-from .history import router as history_router
+from .user_info import router as history_router
 from .ad_broadcast import router as ad_broadcast_router
 from .promo import router as promo_router
 from .log_export import router as log_router

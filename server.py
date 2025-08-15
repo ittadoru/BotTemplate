@@ -28,7 +28,6 @@ async def yookassa_webhook(request: Request):
     При успешной оплате начисляет дни подписки пользователю.
     """
     bot: Bot = app.state.bot
-    r = app.state.redis
 
     try:
         data = await request.json()
@@ -44,22 +43,24 @@ async def yookassa_webhook(request: Request):
 
         user_id = int(user_id_str)
         tariff_id = int(tariff_id_str)
-    except (KeyError, ValueError) as e:
+    except Exception as e:
         await bot.send_message(ADMIN_ERROR, f"Ошибка получения данных webhook: {e}")
         log.log_message(f"Ошибка данных webhook: {e}", log_level="error", emoji="❌")
         raise HTTPException(status_code=400, detail="Invalid data")
 
-    if payment_status == "succeeded":
-        try:
-            tariff = await get_tariff_by_id(tariff_id)
-            days = tariff.duration_days
-        except Exception as e:
-            await bot.send_message(ADMIN_ERROR, f"Ошибка получения тарифа: {e}")
-            log.log_message(f"Ошибка получения тарифа: {e}", log_level="error", emoji="❌")
-            raise HTTPException(status_code=400, detail="Tariff error")
 
-        await add_subscriber_with_duration(user_id, days)
-        log.log_message(f"Подписка продлена для user_id={user_id} на {days} дней", emoji="✅")
+    if payment_status == "succeeded":
+        from db.base import get_session
+        try:
+            async with get_session() as session:
+                tariff = await get_tariff_by_id(session, tariff_id)
+                days = tariff.duration_days
+                await add_subscriber_with_duration(session, user_id, days)
+                log.log_message(f"Подписка продлена для user_id={user_id} на {days} дней", emoji="✅")
+        except Exception as e:
+            await bot.send_message(ADMIN_ERROR, f"Ошибка получения тарифа или продления подписки: {e}")
+            log.log_message(f"Ошибка получения тарифа или продления подписки: {e}", log_level="error", emoji="❌")
+            raise HTTPException(status_code=400, detail="Tariff error")
 
         try:
             # Получаем данные пользователя

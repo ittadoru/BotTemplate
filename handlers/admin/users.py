@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils import logger as log
 from db.base import get_session
-from db.users import get_all_user_ids, User, delete_user_by_id, get_users_by_ids
+from db.users import get_all_user_ids, delete_user_by_id, get_users_by_ids
 from db.subscribers import get_all_subscribers, delete_subscriber_by_id
 
 
@@ -18,7 +18,9 @@ async def list_users(callback: types.CallbackQuery):
     async with get_session() as session:
         user_ids = await get_all_user_ids(session)
         if not user_ids:
-            await callback.message.answer("❌ Пользователей пока нет.")
+            await callback.message.edit_text("❌ Пользователей пока нет.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="manage_users")]
+            ]))
             return
 
         user_ids.sort()
@@ -75,11 +77,15 @@ def get_users_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
 # Удаление всех пользователей
 @router.callback_query(lambda c: c.data == "delete_all_users")
 async def delete_all_users_callback(callback: types.CallbackQuery):
+
     async with get_session() as session:
         user_ids = await get_all_user_ids(session)
+        # Сначала удаляем всех подписчиков
+        for uid in user_ids:
+            await delete_subscriber_by_id(session, int(uid))
+        # Затем всех пользователей
         for uid in user_ids:
             await delete_user_by_id(session, int(uid))
-            await delete_subscriber_by_id(session, int(uid))
         await session.commit()
 
     log.log_message("Админ удалил всех пользователей", emoji="🗑️")

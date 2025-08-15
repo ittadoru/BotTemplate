@@ -10,7 +10,8 @@ class SupportTicket(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, nullable=False)
     username = Column(String, nullable=True)
-    topic_id = Column(Integer, nullable=True, index=True)  # message_thread_id для поддержки
+    topic_id = Column(Integer, nullable=False, index=True)  # message_thread_id для поддержки
+    is_closed = Column(Integer, default=0)  # 0 = False, 1 = True
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     messages = relationship('SupportMessage', back_populates='ticket', cascade='all, delete-orphan')
 
@@ -22,21 +23,23 @@ class SupportMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     ticket = relationship('SupportTicket', back_populates='messages')
 
-async def create_ticket(session: AsyncSession, user_id: int, username: str, message: str):
-    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id))
+async def create_ticket(session: AsyncSession, user_id: int, username: str, topic_id: int, message: str = None):
+    # Проверяем, есть ли открытый тикет
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0))
     ticket = ticket.scalars().first()
     if ticket:
-        return False
-    ticket = SupportTicket(user_id=user_id, username=username)
+        return ticket
+    ticket = SupportTicket(user_id=user_id, username=username, topic_id=topic_id, is_closed=0)
     session.add(ticket)
     await session.flush()
-    msg = SupportMessage(ticket_id=ticket.id, message=message)
-    session.add(msg)
+    if message:
+        msg = SupportMessage(ticket_id=ticket.id, message=message)
+        session.add(msg)
     await session.commit()
-    return True
+    return ticket
 
 async def add_message_to_ticket(session: AsyncSession, user_id: int, message: str):
-    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id))
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0))
     ticket = ticket.scalars().first()
     if not ticket:
         return False
@@ -46,7 +49,7 @@ async def add_message_to_ticket(session: AsyncSession, user_id: int, message: st
     return True
 
 async def get_ticket_messages(session: AsyncSession, user_id: int):
-    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id))
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0))
     ticket = ticket.scalars().first()
     if not ticket:
         return []
@@ -54,10 +57,10 @@ async def get_ticket_messages(session: AsyncSession, user_id: int):
     return [msg.message for msg in result.scalars().all()]
 
 async def close_ticket(session: AsyncSession, user_id: int):
-    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id))
+    ticket = await session.execute(select(SupportTicket).where(SupportTicket.user_id == user_id, SupportTicket.is_closed == 0))
     ticket = ticket.scalars().first()
     if ticket:
-        await session.delete(ticket)
+        ticket.is_closed = 1
         await session.commit()
 
 async def get_user_id_by_topic(session, topic_id: int) -> int | None:

@@ -3,20 +3,25 @@ from aiogram import Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 import payment
+from db.base import get_session
 from db.subscribers import add_subscriber_with_duration
 from db.tariff import get_tariff_by_id
 from utils import logger as log  # твоя функция логирования
 
+
 async def _handle_user_payment(user_id: int, tariff):
     """
-    Продлевает подписку пользователя в Redis.
+    Продлевает подписку пользователя в БД.
     """
     subscription_days = tariff.duration_days
-    await add_subscriber_with_duration(user_id, subscription_days)
-    log.log_message(
-        f"Подписка пользователя {user_id} продлена на {subscription_days} дней.",
-        emoji="🔄", log_level="info"
-    )
+    try:
+        async with get_session() as session:
+            log.log_message(f"[PAYMENT] add_subscriber_with_duration: user_id={user_id}, days={subscription_days}", emoji="🔄", log_level="info")
+            await add_subscriber_with_duration(session, user_id, subscription_days)
+            log.log_message(f"[PAYMENT] Подписка пользователя {user_id} продлена на {subscription_days} дней.", emoji="🔄", log_level="info")
+    except Exception as e:
+        import traceback
+        log.log_message(f"[PAYMENT] Ошибка при продлении подписки пользователя {user_id}: {e}\n{traceback.format_exc()}", emoji="❌", log_level="error")
 
 
 async def _notify_user_and_show_keys(user_id: int, tariff, bot: Bot, request: web.Request):
@@ -78,8 +83,11 @@ async def yookassa_webhook_handler(request: web.Request):
     """
     Обрабатывает вебхуки от YooKassa.
     """
+    import traceback
+    log.log_message("[WEBHOOK] Старт обработки webhook от YooKassa", emoji="⚡", log_level="info")
     try:
         request_body = await request.json()
+        log.log_message(f"[WEBHOOK] request_body: {request_body}", emoji="📦", log_level="info")
         notification = payment.parse_webhook_notification(request_body)
 
         if notification is None or notification.event != 'payment.succeeded':
@@ -89,13 +97,16 @@ async def yookassa_webhook_handler(request: web.Request):
         metadata = notification.object.metadata
         user_id = int(metadata['user_id'])
         tariff_id = int(metadata['tariff_id'])
-        tariff = await get_tariff_by_id(tariff_id)
-        log.log_message(f"Получен webhook от пользователя {user_id} с тарифом {tariff_id}.", emoji="🔔", log_level="error")
+        log.log_message(f"[WEBHOOK] user_id={user_id}, tariff_id={tariff_id}", emoji="🔔", log_level="info")
+        from db.base import get_session
+        async with get_session() as session:
+            tariff = await get_tariff_by_id(session, tariff_id)
+        log.log_message(f"[WEBHOOK] Получен webhook от пользователя {user_id} с тарифом {tariff_id}.", emoji="🔔", log_level="info")
         if not tariff:
             log.log_message(f"Webhook с несуществующим tariff_id: {tariff_id}", emoji="⚠️", log_level="warning")
             return web.Response(status=400)
 
-        log.log_message(f"Обработка успешной оплаты для пользователя {user_id}, тариф '{tariff.name}'.", emoji="💳", log_level="info")
+        log.log_message(f"[WEBHOOK] Обработка успешной оплаты для пользователя {user_id}, тариф '{tariff.name}'.", emoji="💳", log_level="info")
 
         bot: Bot = request.app['bot']
         support_chat_id = request.app['config'].tg_bot.support_chat_id
@@ -104,8 +115,9 @@ async def yookassa_webhook_handler(request: web.Request):
         await _log_transaction(bot, user_id, tariff.name, tariff.price, support_chat_id)
         await _notify_user_and_show_keys(user_id, tariff, bot, request)
 
+        log.log_message(f"[WEBHOOK] Успешно завершено для user_id={user_id}, tariff_id={tariff_id}", emoji="✅", log_level="info")
         return web.Response(status=200)
 
     except Exception as e:
-        log.log_message(f"Фатальная ошибка в обработчике вебхука: {e}", emoji="❌", log_level="error")
+        log.log_message(f"[WEBHOOK] Фатальная ошибка: {e}\n{traceback.format_exc()}", emoji="❌", log_level="error")
         return web.Response(status=500)

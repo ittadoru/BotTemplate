@@ -68,7 +68,7 @@ async def process_button_url(message: Message, state: FSMContext):
 
 # Функция рассылки
 async def send_broadcast(message: Message, text: str, markup: InlineKeyboardMarkup = None):
-    async for session in get_session():
+    async with get_session() as session:
         user_ids = await get_all_user_ids(session)
         sent = 0
 
