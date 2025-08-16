@@ -1,3 +1,5 @@
+"""Общая рассылка: конструктор сообщения (с кнопкой при необходимости) и асинхронная отправка всем пользователям."""
+
 import asyncio
 import logging
 from contextlib import suppress

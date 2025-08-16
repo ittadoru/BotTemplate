@@ -1,3 +1,5 @@
+"""Экспорт таблиц: динамический CSV любой модели SQLAlchemy через инлайн-меню."""
+
 import csv
 import io
 import logging

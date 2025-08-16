@@ -1,3 +1,5 @@
+"""Поддержка (админ): ответы в темах и закрытие тикетов."""
+
 import logging
 from typing import Optional
 

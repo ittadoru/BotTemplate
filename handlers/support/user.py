@@ -1,3 +1,5 @@
+"""Поддержка (пользователь): создание тикета, диалог и закрытие."""
+
 import logging
 from typing import Optional
 

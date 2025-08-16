@@ -1,3 +1,5 @@
+"""Главное меню админа: доступ к статистике, пользователям, промокодам, логам, экспорту, тарифам и рассылкам."""
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery

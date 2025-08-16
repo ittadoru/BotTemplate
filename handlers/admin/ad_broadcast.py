@@ -1,3 +1,5 @@
+"""Рекламная рассылка: конструктор и отправка сообщения пользователям без активной подписки."""
+
 import asyncio
 import logging
 from contextlib import suppress

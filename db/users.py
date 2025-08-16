@@ -1,3 +1,5 @@
+"""Модели пользователя и активности: регистрация/обновление, логирование, выборки и статистика."""
+
 import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func, select

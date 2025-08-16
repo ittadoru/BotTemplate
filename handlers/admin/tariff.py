@@ -1,3 +1,5 @@
+"""Админ: управление тарифами (список, добавление и удаление)."""
+
 import logging
 
 from aiogram import F, Router

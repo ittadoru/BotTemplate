@@ -1,3 +1,5 @@
+"""Модели тикетов поддержки и CRUD-операции: создание, сообщения, поиск и закрытие."""
+
 from sqlalchemy import (Column, DateTime, ForeignKey, Integer, String, func,
                         select)
 from sqlalchemy.ext.asyncio import AsyncSession

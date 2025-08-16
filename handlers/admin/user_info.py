@@ -1,3 +1,5 @@
+"""Админ: поиск пользователя по ID/username и показ карточки."""
+
 import logging
 from datetime import datetime
 from typing import Optional

@@ -1,3 +1,5 @@
+"""Модель подписчика и функции продления, проверки статуса и агрегированной статистики."""
+
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import (Column, DateTime, ForeignKey, Integer, delete, func,
                         select)

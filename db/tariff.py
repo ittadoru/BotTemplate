@@ -1,3 +1,5 @@
+"""Модель тарифного плана и CRUD-операции для управления тарифами."""
+
 from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
