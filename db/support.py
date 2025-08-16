@@ -28,7 +28,7 @@ class SupportMessage(Base):
     ticket = relationship('SupportTicket', back_populates='messages')
 
 
-async def _get_open_ticket_by_user_id(
+async def get_open_ticket(
     session: AsyncSession, user_id: int
 ) -> SupportTicket | None:
     """Получает открытый тикет поддержки по ID пользователя."""
@@ -47,7 +47,7 @@ async def create_ticket(
     Создаёт новый тикет поддержки, если у пользователя ещё нет открытого.
     Возвращает существующий открытый тикет или вновь созданный.
     """
-    existing_ticket = await _get_open_ticket_by_user_id(session, user_id)
+    existing_ticket = await get_open_ticket(session, user_id)
     if existing_ticket:
         return existing_ticket
 
@@ -66,7 +66,7 @@ async def add_message_to_ticket(
     session: AsyncSession, user_id: int, message: str
 ) -> bool:
     """Добавляет сообщение в открытый тикет пользователя."""
-    ticket = await _get_open_ticket_by_user_id(session, user_id)
+    ticket = await get_open_ticket(session, user_id)
     if not ticket:
         return False
 
@@ -78,7 +78,7 @@ async def add_message_to_ticket(
 
 async def get_ticket_messages(session: AsyncSession, user_id: int) -> list[str]:
     """Получает все сообщения из открытого тикета пользователя."""
-    ticket = await _get_open_ticket_by_user_id(session, user_id)
+    ticket = await get_open_ticket(session, user_id)
     if not ticket:
         return []
 
@@ -91,7 +91,7 @@ async def get_ticket_messages(session: AsyncSession, user_id: int) -> list[str]:
 
 async def close_ticket(session: AsyncSession, user_id: int) -> None:
     """Закрывает открытый тикет пользователя."""
-    ticket = await _get_open_ticket_by_user_id(session, user_id)
+    ticket = await get_open_ticket(session, user_id)
     if ticket:
         ticket.is_closed = 1
         await session.commit()
