@@ -1,3 +1,5 @@
+"""Логирование: ротация файлов, цветная консоль и отправка ошибок в Telegram."""
+
 import logging
 import os
 import time
@@ -6,7 +8,7 @@ from logging.handlers import TimedRotatingFileHandler
 from aiogram import Bot
 from colorlog import ColoredFormatter
 
-from config import ADMIN_ERROR
+from config import PRIMARY_ADMIN_ID
 
 
 class TelegramErrorHandler(logging.Handler):
@@ -37,7 +39,7 @@ class TelegramErrorHandler(logging.Handler):
                 loop = asyncio.get_running_loop()
                 loop.create_task(
                     self.bot.send_message(
-                        chat_id=ADMIN_ERROR,
+                        chat_id=PRIMARY_ADMIN_ID,
                         text=f"🆘 <b>Обнаружена ошибка:</b>\n\n<pre>{log_entry}</pre>",
                         parse_mode="HTML"
                     )

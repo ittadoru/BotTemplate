@@ -3,13 +3,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Токен бота
-ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))  # Админы по ID
-ADMIN_ERROR = int(os.getenv("ADMIN"))  # Админ для ошибок
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")  # Подключение к Redis
-SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))  # ID группы поддержки
-SUBSCRIBE_TOPIC_ID = int(os.getenv("SUBSCRIBE_TOPIC_ID"))  # ID темы для уведомлений
-SHOP_ID = int(os.getenv("SHOP_ID"))  # ID магазина
-API_KEY = os.getenv("API_KEY")  # API ключ для магазина
-DOMAIN = os.getenv("DOMAIN") # Домен
-DATABASE_URL = os.getenv("DATABASE_URL")  # URL базы данных
+# ---------------------------------------------------------------------------
+# Базовые параметры бота
+# ---------------------------------------------------------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")          # Токен Telegram бота
+ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))  # Список ID админов (через запятую)
+PRIMARY_ADMIN_ID = int(os.getenv("ADMIN"))  # Главный админ (получает ошибки)
+
+# ---------------------------------------------------------------------------
+# Инфраструктура / внешние сервисы
+# ---------------------------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL")                    # URL базы данных
+
+# ---------------------------------------------------------------------------
+# Поддержка / коммуникация
+# ---------------------------------------------------------------------------
+SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))      # ID группы поддержки
+SUBSCRIBE_TOPIC_ID = int(os.getenv("SUBSCRIBE_TOPIC_ID"))  # ID темы (топика) для уведомлений
+
+# ---------------------------------------------------------------------------
+# Оплата / магазин
+# ---------------------------------------------------------------------------
+SHOP_ID = int(os.getenv("SHOP_ID"))        # ID магазина YooKassa
+API_KEY = os.getenv("API_KEY")            # Секретный ключ API
+DOMAIN = os.getenv("DOMAIN")              # Базовый домен (для ссылок/вебхуков)
+

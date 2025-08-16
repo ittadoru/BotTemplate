@@ -4,10 +4,12 @@ services:
     image: postgres:16
     container_name: postgres
     restart: always
+    env_file:
+      - .env  # берём значения переменных из .env (не коммитьте секреты)
     environment:
-      POSTGRES_USER: templateuser
-      POSTGRES_PASSWORD: 0528sona
-      POSTGRES_DB: templatedb
+      POSTGRES_USER: ${POSTGRES_USER:?must-set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must-set}
+      POSTGRES_DB: ${POSTGRES_DB:?must-set}
     ports:
       - "5432:5432"
     volumes:
