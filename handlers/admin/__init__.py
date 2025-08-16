@@ -7,6 +7,7 @@ from .ad_broadcast import router as ad_broadcast_router
 from .promo import router as promo_router
 from .log_export import router as log_router
 from .tariff import router as tariff_router
+from .table_export import router as table_export_router
 
 routers = [
     menu_router,
@@ -17,5 +18,6 @@ routers = [
     history_router,
     promo_router,
     log_router,
-    tariff_router
+    tariff_router,
+    table_export_router
 ]

@@ -1,91 +1,87 @@
-from sqlalchemy import Column, Integer, DateTime, String, ForeignKey, select, func, text
-from sqlalchemy.ext.asyncio import AsyncSession
-from db.base import Base
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import (Column, DateTime, ForeignKey, Integer, delete, func,
+                        select)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.base import Base
+
 
 class Subscriber(Base):
     __tablename__ = 'subscribers'
-    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), primary_key=True)
     expire_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-class Promocode(Base):
-    __tablename__ = 'promocodes'
-    code = Column(String, primary_key=True)
-    duration_days = Column(Integer, nullable=False)
 
-# --- Подписки ---
-async def add_subscriber_with_duration(session: AsyncSession, user_id: int, days: int):
+# --- Управление подписчиками ---
+
+async def add_subscriber_with_duration(
+    session: AsyncSession, user_id: int, days: int
+) -> Subscriber:
+    """
+    Добавляет или продлевает подписку пользователя.
+    Если подписка активна — продлевает её, иначе создаёт новую.
+    """
     subscriber = await session.get(Subscriber, user_id)
     now = datetime.now(timezone.utc)
+
+    base_date = now
     if subscriber and subscriber.expire_at > now:
-        new_expire = subscriber.expire_at + timedelta(days=days)
-        subscriber.expire_at = new_expire
+        base_date = subscriber.expire_at
+
+    new_expire_at = base_date + timedelta(days=days)
+
+    if subscriber:
+        subscriber.expire_at = new_expire_at
+        # Поле updated_at обновится автоматически за счет onupdate=func.now()
     else:
-        new_expire = now + timedelta(days=days)
-        if not subscriber:
-            subscriber = Subscriber(user_id=user_id, expire_at=new_expire)
-            session.add(subscriber)
-        else:
-            subscriber.expire_at = new_expire
+        subscriber = Subscriber(user_id=user_id, expire_at=new_expire_at)
+        session.add(subscriber)
+
     await session.commit()
     return subscriber
 
+
 async def is_subscriber(session: AsyncSession, user_id: int) -> bool:
+    """Проверяет, есть ли у пользователя активная подписка."""
     subscriber = await session.get(Subscriber, user_id)
-    now = datetime.now(timezone.utc)
-    return subscriber is not None and subscriber.expire_at > now
+    return subscriber is not None and subscriber.expire_at > datetime.now(timezone.utc)
 
-async def get_all_subscribers(session: AsyncSession):
+
+async def get_subscriber_expiry(session: AsyncSession, user_id: int) -> datetime | None:
+    """Возвращает дату окончания подписки пользователя или None."""
+    subscriber = await session.get(Subscriber, user_id)
+    return subscriber.expire_at if subscriber else None
+
+
+async def get_subscriber(session: AsyncSession, user_id: int) -> Subscriber | None:
+    """Возвращает объект Subscriber для пользователя или None."""
+    return await session.get(Subscriber, user_id)
+
+
+async def get_all_subscribers(session: AsyncSession) -> list[Subscriber]:
+    """Возвращает список всех подписчиков."""
     result = await session.execute(select(Subscriber))
-    return result.scalars().all()
+    return list(result.scalars().all())
 
-# --- Промокоды ---
-async def add_promocode(session: AsyncSession, code: str, duration_days: int = 30):
-    promocode = Promocode(code=code, duration_days=duration_days)
-    session.add(promocode)
-    await session.commit()
-    return promocode
 
-async def remove_promocode(session: AsyncSession, code: str):
-    promocode = await session.get(Promocode, code)
-    if promocode:
-        await session.delete(promocode)
-        await session.commit()
+async def get_total_subscribers(session: AsyncSession) -> int:
+    """Возвращает общее количество подписчиков."""
+    return await session.scalar(select(func.count(Subscriber.user_id)))
 
-async def remove_all_promocodes(session: AsyncSession):
-    await session.execute(text('DELETE FROM promocodes'))
-    await session.commit()
 
-async def get_all_promocodes(session: AsyncSession):
-    result = await session.execute(select(Promocode))
-    return result.scalars().all()
+async def get_subscriptions_count_for_period(session: AsyncSession, days: int) -> int:
+    """
+    Подсчитывает количество новых/продленных подписок за указанный период (в днях).
+    """
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    query = select(func.count(Subscriber.user_id)).where(Subscriber.updated_at >= start_date)
+    return await session.scalar(query)
 
-async def activate_promocode(session: AsyncSession, user_id: int, code: str):
-    promocode = await session.get(Promocode, code)
-    if not promocode:
-        return None
-    await add_subscriber_with_duration(session, user_id, promocode.duration_days)
-    await remove_promocode(session, code)
-    return promocode.duration_days
 
-async def get_total_subscribers(session):
-    return await session.scalar(select(func.count()).select_from(Subscriber))
-
-async def delete_subscriber_by_id(session, user_id: int):
+async def delete_subscriber_by_id(session: AsyncSession, user_id: int) -> None:
+    """Удаляет подписчика по его user_id."""
     subscriber = await session.get(Subscriber, user_id)
     if subscriber:
         await session.delete(subscriber)
-
-async def get_subscriber_expiry(session: AsyncSession, user_id: int):
-    """Возвращает expire_at (datetime) для подписчика или None."""
-    subscriber = await session.get(Subscriber, user_id)
-    if subscriber:
-        return subscriber.expire_at
-    return None
-
-async def get_promocode_duration(session: AsyncSession, code: str):
-    """Возвращает количество дней действия промокода по коду или None."""
-    promocode = await session.get(Promocode, code)
-    if promocode:
-        return promocode.duration_days
-    return None
+        await session.commit()

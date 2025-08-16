@@ -1,8 +1,8 @@
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
 from db.base import get_session
-from db.subscribers import add_promocode
-from db.users import add_user, is_user_exists
+from db.promocodes import add_promocode
+from db.users import add_or_update_user, is_user_exists
 import random
 
 router = Router()
@@ -16,7 +16,7 @@ async def cmd_start(message: types.Message, bot: Bot):
     """
     async with get_session() as session:
         is_new = not await is_user_exists(session, message.from_user.id)
-        await add_user(session, message.from_user.id, first_name=message.from_user.first_name, username=message.from_user.username)
+        await add_or_update_user(session, message.from_user.id, first_name=message.from_user.first_name, username=message.from_user.username)
     username = message.from_user.username or message.from_user.full_name or "пользователь"
 
     if is_new:

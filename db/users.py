@@ -1,65 +1,138 @@
-from sqlalchemy import select, func, Column, Integer, String, DateTime
 import datetime
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import relationship
+
 from db.base import Base
-from typing import Optional
+from db.subscribers import Subscriber
+
 
 class User(Base):
+    """Представляет пользователя бота."""
     __tablename__ = 'users'
-    id = Column(Integer, primary_key=True, autoincrement=False)  # Telegram user_id
+    id = Column(Integer, primary_key=True, autoincrement=False)
     first_name = Column(String, nullable=True)
     username = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
+
+
 class UserActivity(Base):
+    """Фиксирует временные метки активности пользователя."""
     __tablename__ = 'user_activity'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer)
-    activity_date = Column(DateTime(timezone=True), default=func.now())
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    activity_date = Column(DateTime(timezone=True), server_default=func.now())
 
-# --- Пользователи ---
-async def add_user(session: AsyncSession, user_id: int, first_name: str = None, username: str = None):
+    user = relationship("User", back_populates="activities")
+
+
+async def add_or_update_user(
+    session: AsyncSession, user_id: int, first_name: str | None, username: str | None
+) -> User:
+    """
+    Добавляет нового пользователя или обновляет имя и username существующего.
+    Обновляет объект пользователя, чтобы загрузить значения, устанавливаемые сервером.
+    """
     user = await session.get(User, user_id)
-    if not user:
+    if user:
+        user.first_name = first_name
+        user.username = username
+        await session.commit()
+        await session.refresh(user)
+    else:
         user = User(id=user_id, first_name=first_name, username=username)
         session.add(user)
         await session.commit()
-        return user
+        await session.refresh(user)
     return user
 
-async def log_user_activity(session: AsyncSession, user_id: int):
-    activity = UserActivity(user_id=user_id, activity_date=datetime.datetime.utcnow())
-    session.add(activity)
+
+async def log_user_activity(session: AsyncSession, user_id: int) -> None:
+    """Логирует активность пользователя."""
+    new_activity = UserActivity(user_id=user_id)
+    session.add(new_activity)
     await session.commit()
 
-async def get_user_id_by_username(session: AsyncSession, username: str) -> Optional[int]:
-    result = await session.execute(select(User).where(User.username == username))
-    user = result.scalars().first()
-    return user.id if user else None
 
-async def get_all_user_ids(session: AsyncSession):
-    result = await session.execute(select(User.id))
-    return [row[0] for row in result.all()]
+async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
+    """Получает пользователя по его username."""
+    query = select(User).where(User.username == username)
+    result = await session.execute(query)
+    return result.scalars().first()
 
-async def get_total_users(session):
-    return await session.scalar(select(func.count()).select_from(User))
 
-async def get_active_users_today(session):
+async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
+    """Получает пользователя по его ID."""
+    return await session.get(User, user_id)
+
+
+async def get_all_user_ids(session: AsyncSession) -> list[int]:
+    """Получает список всех user_id из базы данных."""
+    query = select(User.id)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_total_users(session: AsyncSession) -> int:
+    """Возвращает общее количество пользователей."""
+    return await session.scalar(select(func.count(User.id)))
+
+
+async def get_active_users_today(session: AsyncSession) -> int:
+    """Вычисляет количество уникальных пользователей, активных сегодня."""
     today = datetime.date.today()
-    q = select(func.count(func.distinct(UserActivity.user_id))).where(func.date(UserActivity.activity_date) == today)
-    return await session.scalar(q)
+    query = select(func.count(func.distinct(UserActivity.user_id))).where(
+        func.date(UserActivity.activity_date) == today
+    )
+    return await session.scalar(query)
 
-async def delete_user_by_id(session, user_id: int):
+
+async def get_new_users_count_for_period(session: AsyncSession, days: int) -> int:
+    """
+    Подсчитывает количество новых пользователей за указанный период времени (в днях).
+    """
+    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    query = select(func.count(User.id)).where(User.created_at >= start_date)
+    return await session.scalar(query)
+
+
+async def delete_user_by_id(session: AsyncSession, user_id: int) -> bool:
+    """Удаляет пользователя по его ID."""
     user = await session.get(User, user_id)
     if user:
         await session.delete(user)
+        await session.commit()
+        return True
+    return False
 
-async def get_users_by_ids(session, user_ids: list[int]):
+
+async def get_users_by_ids(session: AsyncSession, user_ids: list[int]) -> list[User]:
+    """Получает список пользователей по списку их ID."""
     if not user_ids:
         return []
-    result = await session.execute(select(User).where(User.id.in_(user_ids)))
-    return result.scalars().all()
+    query = select(User).where(User.id.in_(user_ids))
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
 
 async def is_user_exists(session: AsyncSession, user_id: int) -> bool:
+    """Проверяет, существует ли пользователь в базе данных."""
     user = await session.get(User, user_id)
     return user is not None
+
+
+async def get_user_ids_without_subscription(session: AsyncSession) -> list[int]:
+    """
+    Возвращает список ID пользователей, у которых нет активной подписки.
+    Использует LEFT JOIN для эффективного поиска.
+    """
+    query = (
+        select(User.id)
+        .outerjoin(Subscriber, User.id == Subscriber.user_id)
+        .where(Subscriber.user_id.is_(None))
+    )
+    result = await session.execute(query)
+    return list(result.scalars().all())

@@ -6,7 +6,7 @@ from config import SUPPORT_GROUP_ID
 from states.support import Support
 from utils import logger as log
 from db.base import get_session
-from db.support import create_ticket, get_ticket, close_ticket, SupportTicket
+from db.support import create_ticket, close_ticket, SupportTicket
 from sqlalchemy.future import select
 
 

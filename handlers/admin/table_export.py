@@ -1,54 +1,120 @@
-
-
-import io
 import csv
-from db.base import get_session, Base
-from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram import Router
+import io
+from datetime import datetime
+
+from aiogram import F, Router
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import CallbackQuery, FSInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select
+
+# Это гарантирует, что все модели будут зарегистрированы в Base.registry
+# до того, как мы попытаемся их получить.
+import db
+from db.base import Base, get_session
 
 router = Router()
 
 
-# --- Экспорт таблиц ---
+class TableExportCallback(CallbackData, prefix="export"):
+    """Фабрика колбэков для экспорта таблиц."""
+    table_name: str
+
+
 def get_all_models():
-    # Получить все модели, наследующиеся от Base
-    return [mapper.class_ for mapper in Base.registry.mappers]
+    """
+    Динамически получает все модели, унаследованные от Base.
+    Работает благодаря тому, что все модели импортированы в db/__init__.py.
+    """
+    # Сортируем модели по имени таблицы для предсказуемого порядка кнопок
+    return sorted(Base.registry.mappers, key=lambda m: m.class_.__tablename__)
 
-def get_table_keyboard():
+
+def get_table_keyboard() -> InlineKeyboardBuilder:
+    """Создает клавиатуру со списком всех доступных для экспорта таблиц."""
+    builder = InlineKeyboardBuilder()
     models = get_all_models()
-    keyboard = []
-    for model in models:
-        table_name = model.__tablename__
-        btn = InlineKeyboardButton(text=table_name, callback_data=f"export_table_{table_name}")
-        keyboard.append([btn])
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-@router.callback_query(lambda c: c.data == "export_table_menu")
+    for mapper in models:
+        model_class = mapper.class_
+        table_name = model_class.__tablename__
+        builder.button(
+            text=f"📄 {table_name}",
+            callback_data=TableExportCallback(table_name=table_name).pack()
+        )
+
+    builder.button(text="⬅️ Назад", callback_data="admin_menu")
+    builder.adjust(2)  # Располагаем по 2 кнопки в ряд
+    return builder
+
+
+@router.callback_query(F.data == "export_table_menu")
 async def export_table_menu(callback: CallbackQuery):
-    await callback.message.edit_text("Выберите таблицу для экспорта:", reply_markup=get_table_keyboard())
+    """Отображает меню выбора таблиц для экспорта."""
+    builder = get_table_keyboard()
+    await callback.message.edit_text(
+        "Выберите таблицу для экспорта:",
+        reply_markup=builder.as_markup()
+    )
     await callback.answer()
 
 
-# Универсальный обработчик экспорта любой таблицы
-@router.callback_query(lambda c: c.data.startswith("export_table_") and c.data != "export_table_menu")
-async def export_table(callback: CallbackQuery):
-    table_name = callback.data.replace("export_table_", "")
-    # Найти модель по имени таблицы
-    model = next((m for m in get_all_models() if m.__tablename__ == table_name), None)
-    if not model:
-        await callback.answer("Таблица не найдена", show_alert=True)
+def format_value(value):
+    """Форматирует значения для корректной записи в CSV."""
+    if isinstance(value, datetime):
+        # Приводим дату к локальному времени и форматируем
+        return value.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    if value is None:
+        return ""
+    return str(value)
+
+
+@router.callback_query(TableExportCallback.filter())
+async def export_table_handler(callback: CallbackQuery, callback_data: TableExportCallback):
+    """
+    Универсальный обработчик экспорта любой таблицы в формат CSV.
+    """
+    table_name = callback_data.table_name
+    await callback.answer(f"⏳ Начинаю экспорт таблицы {table_name}...")
+
+    # Находим модель по имени таблицы
+    model_mapper = next((m for m in get_all_models() if m.class_.__tablename__ == table_name), None)
+
+    if not model_mapper:
+        await callback.message.answer(f"❌ Ошибка: Таблица '{table_name}' не найдена.")
         return
+
+    model_class = model_mapper.class_
+
     async with get_session() as session:
-        result = await session.execute(model.__table__.select())
-        rows = result.fetchall()
-        headers = result.keys()
+        # Выбираем все данные из таблицы
+        result = await session.execute(select(model_class))
+        rows = result.scalars().all()
+
+        if not rows:
+            await callback.message.answer(f"ℹ️ Таблица '{table_name}' пуста.")
+            return
+
+        # Получаем заголовки из колонок модели
+        headers = [c.name for c in model_class.__table__.columns]
+
+    # Создаем CSV в памяти
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+    # Записываем заголовки
     writer.writerow(headers)
-    for row in rows:
-        writer.writerow([str(col) if col is not None else "" for col in row])
+
+    # Записываем строки
+    for row_obj in rows:
+        writer.writerow([format_value(getattr(row_obj, h)) for h in headers])
+
     output.seek(0)
-    file = FSInputFile(io.BytesIO(output.getvalue().encode()), f"{table_name}.csv")
-    await callback.message.answer_document(file, caption=f"Экспорт: {table_name}.csv")
-    await callback.answer()
+    csv_data = output.getvalue().encode('utf-8')
+
+    # Отправляем файл
+    file = FSInputFile(io.BytesIO(csv_data), f"{table_name}.csv")
+    await callback.message.answer_document(
+        file,
+        caption=f"📄 Экспорт таблицы: `{table_name}.csv`"
+    )

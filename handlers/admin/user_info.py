@@ -1,113 +1,148 @@
-from aiogram import types, Router
-from aiogram.fsm.context import FSMContext
-from states.history import HistoryStates
+import logging
 from datetime import datetime
-from utils import logger as log
-from db.base import get_session
-from db.users import get_all_user_ids
-from db.subscribers import Subscriber
-from db.users import User
 
+from aiogram import Bot, F, Router, types
+from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from db import subscribers as db_subscribers
+from db import users as db_users
+from db.base import get_session
+from states.history import HistoryStates
 
 router = Router()
 
 
-@router.callback_query(lambda c: c.data == "user_history_start")
-async def show_user_history(callback: types.CallbackQuery, state: FSMContext):
-    """Запрос ID или username для просмотра истории пользователя (только для админов)."""
-    await state.set_state(HistoryStates.waiting_for_id_or_username)
+class UserCallback(CallbackData, prefix="user_admin"):
+    """Фабрика колбэков для действий с пользователем в админ-панели."""
+    action: str
+    user_id: int
 
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="manage_users")]
-        ]
-    )
+
+@router.callback_query(F.data == "user_history_start")
+async def show_user_history_prompt(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Запрашивает у администратора ID или username, изменяя текущее сообщение
+    и сохраняя его ID для последующего редактирования.
+    """
+    await state.set_state(HistoryStates.waiting_for_id_or_username)
+    await state.update_data(message_to_edit=callback.message.message_id)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад", callback_data="manage_users")
 
     await callback.message.edit_text(
         "⚠️ Введите ID или username пользователя:",
-        reply_markup=keyboard
+        reply_markup=builder.as_markup()
     )
     await callback.answer()
 
 
 @router.message(HistoryStates.waiting_for_id_or_username)
-async def process_id_or_username(message: types.Message, state: FSMContext):
-    """Обработка введённого ID или username, поиск истории ссылок пользователя."""
-    arg = message.text.strip()
-    user_id = None
+async def process_user_lookup(message: types.Message, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает введенный ID/username, находит пользователя,
+    удаляет сообщение администратора и изменяет исходное сообщение,
+    превращая его в информационную карточку.
+    """
+    data = await state.get_data()
+    message_id_to_edit = data.get("message_to_edit")
+    await state.clear()
+
+    user_identifier = message.text.strip()
+    user = None
+
+    # Удаляем сообщение администратора с ID/username
+    await message.delete()
 
     async with get_session() as session:
-        if arg.isdigit():
-            user_id = int(arg)
+        if user_identifier.isdigit():
+            user = await db_users.get_user_by_id(session, int(user_identifier))
         else:
-            # Поиск по username (без @, в нижнем регистре)
-            username = arg.lstrip("@").lower()
-            user_ids = await get_all_user_ids(session)
-            for uid in user_ids:
-                user = await session.get(User, int(uid))
-                if user and user.username and user.username.lower() == username:
-                    user_id = int(uid)
-                    break
+            username = user_identifier.lstrip("@").lower()
+            user = await db_users.get_user_by_username(session, username)
 
-    # Если пользователь не найден
-    if user_id is None:
-        await message.answer("❌ Пользователь не найден.")
-        await state.clear()
-        return
-
-
-    async with get_session() as session:
-        user = await session.get(User, user_id)
         if not user:
-            await message.answer("❌ Пользователь не найден.")
-            await state.clear()
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=message_id_to_edit,
+                text="❌ Пользователь не найден."
+            )
             return
 
         # Получение информации о подписке
-        subscriber = await session.get(Subscriber, user_id)
-        if subscriber and subscriber.expire_at:
-            expiry_date = subscriber.expire_at
-            now = datetime.now(expiry_date.tzinfo)
-            if expiry_date > now:
-                subscription_status = f"✅ Подписка активна до <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>"
-            else:
-                subscription_status = "❌ Подписка истекла"
+        is_active = await db_subscribers.is_subscriber(session, user.id)
+        if is_active:
+            expiry_date = await db_subscribers.get_subscriber_expiry(session, user.id)
+            subscription_status = f"✅ Активна до {expiry_date.strftime('%d.%m.%Y %H:%M')}"
         else:
-            subscription_status = "❌ Подписка не активна"
+            subscription_status = "❌ Не активна"
 
-        name = user.first_name or ""
-        username = user.username or ""
-
-    user_info = "<b>👤 Пользователь:</b>\n\n"
-    user_info += f"ID: <code>{user_id}</code>\n"
-    user_info += f"Имя: {name}\n"
-    user_info += f"{subscription_status}\n"
-    if username:
-        user_info += f"Username: @{username}\n"
-
-    # Клавиатура: удалить пользователя и назад
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton(text=f"🗑️ Удалить пользователя", callback_data=f"delete_user:{user_id}")],
-            [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="manage_users")]
+        # Формирование текста сообщения
+        user_info_parts = [
+            f"<b>👤 Информация о пользователе</b>\n",
+            f"<b>ID:</b> <code>{user.id}</code>",
+            f"<b>Имя:</b> {user.first_name or 'не указано'}"
         ]
+        if user.username:
+            user_info_parts.append(f"<b>Username:</b> @{user.username}")
+        if user.created_at:
+            user_info_parts.append(f"<b>Зарегистрирован:</b> {user.created_at.strftime('%d.%m.%Y %H:%M')}")
+        
+        user_info_parts.append(f"<b>Подписка:</b> {subscription_status}")
+        user_info_text = "\n".join(user_info_parts)
+
+    # Создание клавиатуры
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🗑️ Удалить пользователя",
+        callback_data=UserCallback(action="delete", user_id=user.id).pack()
     )
-    log.log_message(f"Админ просмотрел историю пользователя {user_id}", emoji="📜")
-    await message.answer(user_info, parse_mode="HTML", reply_markup=keyboard)
-    await state.clear()
+    builder.button(text="⬅️ Назад", callback_data="manage_users")
+    builder.adjust(1)
+
+    logging.info(f"Админ {message.from_user.id} просмотрел информацию о пользователе {user.id}")
+    await bot.edit_message_text(
+        text=user_info_text,
+        chat_id=message.chat.id,
+        message_id=message_id_to_edit,
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
 
 
-async def delete_user_callback(callback: types.CallbackQuery):
-    uid = int(callback.data.split(":")[1])
+@router.callback_query(UserCallback.filter(F.action == "delete"))
+async def delete_user_handler(callback: types.CallbackQuery, callback_data: UserCallback):
+    """
+    Обрабатывает нажатие кнопки 'Удалить пользователя'.
+    Изменяет сообщение, возвращая меню управления пользователями и уведомляя о результате.
+    """
+    user_id_to_delete = callback_data.user_id
+    admin_id = callback.from_user.id
 
     async with get_session() as session:
-        user = await session.get(User, uid)
-        if user:
-            await session.delete(user)
-        subscriber = await session.get(Subscriber, uid)
-        if subscriber:
-            await session.delete(subscriber)
-        await session.commit()
+        success = await db_users.delete_user_by_id(session, user_id_to_delete)
 
-    await callback.message.answer(f"Пользователь {uid} удалён", show_alert=True)
-    log.log_message(f"Админ удалил пользователя {uid}", emoji="🗑️")
+    # Создаем клавиатуру меню управления пользователями
+    manage_users_keyboard = InlineKeyboardBuilder()
+    manage_users_keyboard.button(text="👥 Все пользователи", callback_data="all_users")
+    manage_users_keyboard.button(text="🔍 Данные пользователя", callback_data="user_history_start")
+    manage_users_keyboard.button(text="🗑️ Удалить всех пользователей", callback_data="delete_all_users")
+    manage_users_keyboard.button(text="⬅️ Назад", callback_data="admin_menu")
+    manage_users_keyboard.adjust(1)
+
+    if success:
+        logging.info(f"Админ {admin_id} удалил пользователя {user_id_to_delete}")
+        text = f"✅ Пользователь <code>{user_id_to_delete}</code> успешно удалён.\n\nВыберите действие:"
+    else:
+        logging.warning(f"Админ {admin_id} не смог удалить несуществующего пользователя {user_id_to_delete}")
+        text = f"❌ Не удалось найти и удалить пользователя <code>{user_id_to_delete}</code>.\n\nВыберите действие:"
+
+    await callback.message.edit_text(
+        text=text,
+        reply_markup=manage_users_keyboard.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+

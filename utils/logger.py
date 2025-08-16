@@ -2,14 +2,16 @@ import logging
 import os
 import time
 from logging.handlers import TimedRotatingFileHandler
+
 from aiogram import Bot
+from colorlog import ColoredFormatter
+
 from config import ADMIN_ERROR
 
-# --- Custom Telegram Handler ---
+
 class TelegramErrorHandler(logging.Handler):
-    """
-    Кастомный обработчик для отправки критических логов в Telegram.
-    """
+    """Кастомный обработчик для отправки критических логов в Telegram."""
+
     def __init__(self, bot: Bot, level=logging.ERROR):
         super().__init__(level=level)
         self.bot = bot
@@ -17,21 +19,20 @@ class TelegramErrorHandler(logging.Handler):
         self.cooldown = 60  # seconds
 
     def emit(self, record: logging.LogRecord):
+        """Отправляет отформатированную запись лога в Telegram."""
         current_time = time.time()
         if current_time - self.last_sent_time < self.cooldown:
             return  # Не отправляем, если не прошел кулдаун
 
         log_entry = self.format(record)
-        # Экранируем символы, которые могут быть интерпретированы как Markdown/HTML
+        # Экранируем HTML-символы
         log_entry = log_entry.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        
-        # Обрезаем сообщение, если оно слишком длинное
+
         if len(log_entry) > 4000:
             log_entry = log_entry[:4000] + "\n... (сообщение обрезано)"
 
         try:
             import asyncio
-            # Проверяем, запущен ли event loop, чтобы избежать ошибки RuntimeError
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(
@@ -43,35 +44,32 @@ class TelegramErrorHandler(logging.Handler):
                 )
                 self.last_sent_time = current_time
             except RuntimeError:
-                 # Если event loop не запущен, мы не можем отправить сообщение.
-                 # Это может произойти при ошибках на самом старте приложения.
-                 logging.getLogger(__name__).warning("Не удалось отправить лог в Telegram: event loop не запущен.")
-
+                logging.getLogger(__name__).warning(
+                    "Не удалось отправить лог в Telegram: event loop не запущен."
+                )
         except Exception as e:
-            # Если отправка не удалась, логируем это стандартным способом
-            logging.getLogger(__name__).exception(f"Не удалось отправить лог ошибки в Telegram: {e}")
+            logging.getLogger(__name__).exception(
+                f"Не удалось отправить лог ошибки в Telegram: {e}"
+            )
 
 
-# --- File Rotation Setup ---
 def custom_rotator(source, dest):
-    """
-    Переименовывает архивные логи в формат bot_YYYY-MM-DD.log
-    """
+    """Переименовывает архивные логи в формат bot_YYYY-MM-DD.log."""
     dirname, basename = os.path.split(dest)
-    # dest по умолчанию logs/bot.log.YYYY-MM-DD
     date_part = basename.split('.')[-1]
     new_name = os.path.join(dirname, f"bot_{date_part}.log")
     if os.path.exists(new_name):
         os.remove(new_name)
     os.rename(source, new_name)
 
-# --- Main Setup Function ---
+
 def setup_logger(bot: Bot = None):
     """
     Настраивает корневой логгер для всего приложения.
     - Пишет DEBUG логи в файл с ротацией.
-    - Пишет INFO логи в консоль.
+    - Пишет INFO логи в консоль с цветовым выделением.
     - Отправляет ERROR логи в Telegram, если передан bot.
+    - Фильтрует "шумные" логи от сторонних библиотек.
     """
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -81,9 +79,16 @@ def setup_logger(bot: Bot = None):
         "%(asctime)s | %(levelname)-8s | %(name)-25s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
-    console_formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%H:%M:%S"
+    console_formatter = ColoredFormatter(
+        "%(log_color)s%(asctime)s | %(levelname)-8s | %(message)s",
+        datefmt="%H:%M:%S",
+        log_colors={
+            'DEBUG': 'cyan',
+            'INFO': 'green',
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'bold_red',
+        }
     )
 
     # --- Обработчик для файла (с ротацией) ---
@@ -91,23 +96,22 @@ def setup_logger(bot: Bot = None):
         filename=os.path.join(log_dir, "bot.log"),
         when="midnight",
         interval=1,
-        backupCount=14,  # Храним логи за 14 дней
+        backupCount=7,
         encoding="utf-8"
     )
     file_handler.setFormatter(file_formatter)
-    file_handler.setLevel(logging.DEBUG)  # В файл пишем всё, начиная с DEBUG
+    file_handler.setLevel(logging.DEBUG)
     file_handler.rotator = custom_rotator
 
     # --- Обработчик для консоли ---
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(console_formatter)
-    console_handler.setLevel(logging.INFO) # В консоль выводим только INFO и выше
+    console_handler.setLevel(logging.INFO)
 
     # --- Получаем корневой логгер и настраиваем его ---
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG) # Устанавливаем самый низкий уровень на корневом логгере
-    
-    # Очищаем предыдущие обработчики, чтобы избежать дублирования
+    root_logger.setLevel(logging.DEBUG)
+
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
@@ -123,22 +127,23 @@ def setup_logger(bot: Bot = None):
         telegram_handler.setFormatter(error_formatter)
         root_logger.addHandler(telegram_handler)
 
-    # Перенаправляем логи от uvicorn и aiogram в нашу систему
+    # --- Фильтрация логов сторонних библиотек ---
+    # Устанавливаем более высокий уровень, чтобы отсечь "шум"
+    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("aiogram").setLevel(logging.INFO)
-    
+
     logging.info("Система логирования успешно настроена.")
+
 
 def log_message(message: str, level: int = 0, emoji: str = "", log_level: str = "info"):
     """
     Удобная обертка для логирования сообщений в старом стиле.
-    level — уровень вложенности для отступа, emoji — добавляет визуальный акцент.
     """
     indent = " " * (level * 3)
     prefix = f"{emoji} " if emoji else ""
     full_message = f"{indent}{prefix}{message}"
-
-    # Получаем тот же логгер, который мы настроили
     logger = logging.getLogger()
 
     if log_level == "info":
@@ -150,16 +155,13 @@ def log_message(message: str, level: int = 0, emoji: str = "", log_level: str = 
     elif log_level == "debug":
         logger.debug(full_message)
     else:
-        logger.info(full_message) # По умолчанию info
+        logger.info(full_message)
+
 
 def log_error(error: Exception, context: str = ""):
     """
-    Логирует исключение с полным трассировкой (traceback).
+    Логирует исключение с полным traceback.
     """
     logger = logging.getLogger()
-    
-    # Формируем сообщение с контекстом, если он есть
     error_message = f"Произошла ошибка: {context}" if context else "Произошла ошибка"
-    
-    # Используем exc_info=True, чтобы автоматически добавить traceback
     logger.error(error_message, exc_info=error)
