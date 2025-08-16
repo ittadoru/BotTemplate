@@ -41,7 +41,7 @@ async def show_promo_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "add_promocode")
 async def add_promocode_start(callback: CallbackQuery, state: FSMContext):
     """Запускает процесс добавления нового промокода."""
-    await callback.message.edit_text(
+    await callback.message.answer(
         "Введите данные для промокода.\n\n"
         "<b>Формат:</b> <code>КОД ДНИ [КОЛ-ВО]</code>\n\n"
         "• <code>КОД</code> — сам промокод (без пробелов).\n"
@@ -96,7 +96,7 @@ async def process_add_promocode(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "remove_promocode")
 async def remove_promocode_start(callback: CallbackQuery, state: FSMContext):
     """Запускает процесс удаления промокода."""
-    await callback.message.edit_text("Введите промокод, который хотите удалить:")
+    await callback.message.answer("Введите промокод, который хотите удалить:")
     await state.set_state(PromoStates.remove)
     await callback.answer()
 

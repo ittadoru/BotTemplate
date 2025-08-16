@@ -1,10 +1,11 @@
 import csv
 import io
+import logging
 from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import CallbackQuery, FSInputFile
+from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 
@@ -77,44 +78,59 @@ async def export_table_handler(callback: CallbackQuery, callback_data: TableExpo
     table_name = callback_data.table_name
     await callback.answer(f"⏳ Начинаю экспорт таблицы {table_name}...")
 
-    # Находим модель по имени таблицы
-    model_mapper = next((m for m in get_all_models() if m.class_.__tablename__ == table_name), None)
+    try:
+        # Находим модель по имени таблицы
+        model_mapper = next((m for m in get_all_models() if m.class_.__tablename__ == table_name), None)
 
-    if not model_mapper:
-        await callback.message.answer(f"❌ Ошибка: Таблица '{table_name}' не найдена.")
-        return
-
-    model_class = model_mapper.class_
-
-    async with get_session() as session:
-        # Выбираем все данные из таблицы
-        result = await session.execute(select(model_class))
-        rows = result.scalars().all()
-
-        if not rows:
-            await callback.message.answer(f"ℹ️ Таблица '{table_name}' пуста.")
+        if not model_mapper:
+            await callback.answer(f"❌ Ошибка: Таблица '{table_name}' не найдена.", show_alert=True)
             return
 
-        # Получаем заголовки из колонок модели
-        headers = [c.name for c in model_class.__table__.columns]
+        model_class = model_mapper.class_
 
-    # Создаем CSV в памяти
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        async with get_session() as session:
+            # Выбираем все данные из таблицы
+            result = await session.execute(select(model_class))
+            rows = result.scalars().all()
 
-    # Записываем заголовки
-    writer.writerow(headers)
+            if not rows:
+                await callback.message.edit_text(
+                f"ℹ️ Таблица '<b>{table_name}</b>' пуста.\n\n"
+                    "Выберите другую таблицу для экспорта:",
+                reply_markup=callback.message.reply_markup  # Оставляем ту же клавиатуру
+                )       
+                await callback.answer()
+                return
 
-    # Записываем строки
-    for row_obj in rows:
-        writer.writerow([format_value(getattr(row_obj, h)) for h in headers])
+            # Получаем заголовки из колонок модели
+            headers = [c.name for c in model_class.__table__.columns]
 
-    output.seek(0)
-    csv_data = output.getvalue().encode('utf-8')
+        # Создаем CSV в памяти
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
-    # Отправляем файл
-    file = FSInputFile(io.BytesIO(csv_data), f"{table_name}.csv")
-    await callback.message.answer_document(
-        file,
-        caption=f"📄 Экспорт таблицы: `{table_name}.csv`"
-    )
+        # Записываем заголовки
+        writer.writerow(headers)
+
+        # Записываем строки
+        for row_obj in rows:
+            writer.writerow([format_value(getattr(row_obj, h)) for h in headers])
+
+        output.seek(0)
+        csv_data = output.getvalue().encode('utf-8')
+
+        # Отправляем файл
+        file = BufferedInputFile(csv_data, filename=f"{table_name}.csv")
+        await callback.message.answer_document(
+            file,
+            caption=f"📄 Экспорт таблицы: `{table_name}.csv`"
+        )
+        # Завершаем колбэк после успешной отправки
+        await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Ошибка при экспорте таблицы {table_name}: {e}", exc_info=True)
+        await callback.answer(
+            f"❌ Произошла ошибка при экспорте таблицы {table_name}. Подробности в логах.",
+            show_alert=True
+        )

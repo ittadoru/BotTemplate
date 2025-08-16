@@ -130,7 +130,6 @@ def setup_logger(bot: Bot = None):
     # --- Фильтрация логов сторонних библиотек ---
     # Устанавливаем более высокий уровень, чтобы отсечь "шум"
     logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 

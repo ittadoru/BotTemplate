@@ -69,9 +69,17 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     return await session.get(User, user_id)
 
 
-async def get_all_user_ids(session: AsyncSession) -> list[int]:
-    """Получает список всех user_id из базы данных."""
-    query = select(User.id)
+async def get_all_user_ids(
+    session: AsyncSession, limit: int | None = None, offset: int | None = None
+) -> list[int]:
+    """
+    Получает список всех user_id из базы данных с возможностью пагинации.
+    """
+    query = select(User.id).order_by(User.id)
+    if limit:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
     result = await session.execute(query)
     return list(result.scalars().all())
 

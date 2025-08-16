@@ -39,8 +39,11 @@ async def handle_stats(callback: CallbackQuery):
 
     except Exception as e:
         logging.error(f"Ошибка при получении статистики: {e}", exc_info=True)
-        await callback.message.answer("⚠️ Ошибка при получении статистики.")
-        return await callback.answer()
+        await callback.answer(
+            "⚠️ Ошибка при получении статистики. Подробности в логах.",
+            show_alert=True
+        )
+        return
 
     # --- Расчеты ---
     sub_percentage = (total_subscribers / total_users * 100) if total_users > 0 else 0
