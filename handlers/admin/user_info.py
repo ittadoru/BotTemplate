@@ -1,7 +1,7 @@
 """Админ: поиск пользователя по ID/username и показ карточки."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from aiogram import Bot, F, Router, types
@@ -84,10 +84,14 @@ async def process_user_lookup(message: types.Message, state: FSMContext, bot: Bo
 
         # Получение информации о подписке
         expiry_date = await db_subscribers.get_subscriber_expiry(session, user.id)
-        if expiry_date and expiry_date > datetime.now():
-            subscription_status = (
-                f"✅ Активна до {expiry_date.strftime('%d.%m.%Y %H:%M')}"
-            )
+        now_utc = datetime.now(timezone.utc)
+        # Нормализуем возможный naive datetime (защитно, хотя в модели timezone=True)
+        if expiry_date and expiry_date.tzinfo is None:
+            expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+
+        if expiry_date and expiry_date > now_utc:
+            # Форматируем в UTC (можно позже адаптировать под локаль)
+            subscription_status = f"✅ Активна до {expiry_date.strftime('%d.%m.%Y %H:%M')} UTC"
         else:
             subscription_status = "❌ Не активна"
 
