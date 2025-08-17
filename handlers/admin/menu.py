@@ -19,6 +19,7 @@ def get_admin_menu_keyboard():
     builder.row(InlineKeyboardButton(text="📦 Выгрузить логи", callback_data="get_logs"))
     builder.row(InlineKeyboardButton(text="📊 Экспорт таблицы", callback_data="export_table_menu"))
     builder.row(InlineKeyboardButton(text="💳 Управление тарифами", callback_data="tariff_menu"))
+    builder.row(InlineKeyboardButton(text="📢 Каналы", callback_data="channels_menu"))
     builder.row(
         InlineKeyboardButton(text="📨 Обычная рассылка", callback_data="broadcast_start"),
         InlineKeyboardButton(text="💸 Рекламная рассылка", callback_data="ad_broadcast_start")
