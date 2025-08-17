@@ -14,6 +14,7 @@ from db.channels import (
     is_channel_guard_enabled,
     toggle_channel_guard,
 )
+from sqlalchemy.exc import ProgrammingError
 
 router = Router()
 router.message.filter(F.from_user.id.in_(ADMINS))
@@ -56,11 +57,16 @@ def _channels_menu_kb(channels, guard_on: bool):
 
 @router.callback_query(F.data == "channels_menu")
 async def show_channels_menu(callback: CallbackQuery):
-    async with get_session() as session:
-        channels = await list_channels(session)
-        text = await _channels_menu_text(session)
-        guard_on = await is_channel_guard_enabled(session)
-    await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on))
+    try:
+        async with get_session() as session:
+            channels = await list_channels(session)
+            text = await _channels_menu_text(session)
+            guard_on = await is_channel_guard_enabled(session)
+        await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on))
+    except ProgrammingError:
+        await callback.message.edit_text(
+            "Таблицы каналов ещё не созданы. Примените миграции (alembic upgrade head) или перезапустите контейнер app."
+        )
     await callback.answer()
 
 

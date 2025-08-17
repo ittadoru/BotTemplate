@@ -2,7 +2,7 @@
 
 import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func, select
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Boolean, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import relationship
 
@@ -17,6 +17,9 @@ class User(Base):
     first_name = Column(String, nullable=True)
     username = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Флаг «хоть раз платил» и дата первого платежа
+    has_paid_ever = Column(Boolean, nullable=False, server_default="false")
+    first_paid_at = Column(DateTime(timezone=True), nullable=True)
 
     activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
 
@@ -124,6 +127,35 @@ async def get_users_by_ids(session: AsyncSession, user_ids: list[int]) -> list[U
     if not user_ids:
         return []
     query = select(User).where(User.id.in_(user_ids))
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def mark_user_has_paid(session: AsyncSession, user_id: int) -> None:
+    """Отмечает пользователя как совершившего хотя бы один платёж (идемпотентно)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    user = await session.get(User, user_id)
+    if user:
+        if not user.has_paid_ever:
+            user.has_paid_ever = True
+            if user.first_paid_at is None:
+                user.first_paid_at = now
+            await session.commit()
+    else:  # На случай если где-то не был создан ранее
+        user = User(id=user_id, first_name=None, username=None, has_paid_ever=True, first_paid_at=now)
+        session.add(user)
+        await session.commit()
+
+
+async def has_user_paid_ever(session: AsyncSession, user_id: int) -> bool:
+    """Возвращает True если пользователь когда-либо совершал платеж (флаг установлен)."""
+    user = await session.get(User, user_id)
+    return bool(user and user.has_paid_ever)
+
+
+async def get_user_ids_never_paid(session: AsyncSession) -> list[int]:
+    """Возвращает список user_id, которые ни разу не оплачивали (has_paid_ever = false)."""
+    query = select(User.id).where(User.has_paid_ever.is_(False))  # noqa: E712 SQLAlchemy сравнивает правильно
     result = await session.execute(query)
     return list(result.scalars().all())
 

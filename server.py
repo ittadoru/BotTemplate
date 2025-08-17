@@ -17,6 +17,7 @@ from db.subscribers import (
     is_payment_processed,
     mark_payment_processed,
 )
+from db.users import mark_user_has_paid
 from db.tariff import get_tariff_by_id
 from config import BOT_TOKEN, SUPPORT_GROUP_ID, SUBSCRIBE_TOPIC_ID, PRIMARY_ADMIN_ID
 
@@ -102,6 +103,7 @@ async def yookassa_webhook(request: Request) -> JSONResponse:  # (2)
                 days = tariff.duration_days  # type: ignore[assignment]
                 await add_subscriber_with_duration(session, user_id, days)
                 await mark_payment_processed(session, payment_id, user_id)
+                await mark_user_has_paid(session, user_id)
                 logger.info("Subscription extended user_id=%s days=%s tariff_id=%s", user_id, days, tariff_id)
         except Exception as e:  # (6)
             admin_errors.append(f"Tariff/subscription error: {e}")

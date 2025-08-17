@@ -130,12 +130,21 @@ def setup_logger(bot: Bot = None):
         root_logger.addHandler(telegram_handler)
 
     # --- Фильтрация логов сторонних библиотек ---
-    # Устанавливаем более высокий уровень, чтобы отсечь "шум"
+    # Значение по умолчанию: показывать только WARNING и выше.
+    # Теперь ужесточим SQLAlchemy до ERROR, чтобы скрыть INFO/DEBUG (в т.ч. SQL) при echo=False.
+    sql_level_name = os.getenv("SQLALCHEMY_LOG_LEVEL", "ERROR").upper()
+    valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+    if sql_level_name not in valid_levels:
+        sql_level_name = "ERROR"
+    sql_level = getattr(logging, sql_level_name, logging.ERROR)
+
     logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(sql_level)
+    logging.getLogger("sqlalchemy.pool").setLevel(sql_level)
+    logging.getLogger("sqlalchemy.dialects").setLevel(sql_level)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-    logging.info("Система логирования успешно настроена.")
+    logging.info("Система логирования успешно настроена. (SQLALCHEMY_LOG_LEVEL=%s, echo=%s)", sql_level_name, os.getenv("SQL_ECHO"))
 
 
 def log_message(message: str, level: int = 0, emoji: str = "", log_level: str = "info"):

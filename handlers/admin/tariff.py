@@ -1,4 +1,4 @@
-"""Админ: управление тарифами (список, добавление и удаление)."""
+"""Админ: управление тарифами (список, добавление, редактирование, удаление)."""
 
 import logging
 
@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import ADMINS
 from db.base import get_session
-from db.tariff import create_tariff, delete_tariff, get_all_tariffs
+from db.tariff import create_tariff, delete_tariff, get_all_tariffs, update_tariff
 from states.tariff import TariffStates
 
 # Инициализация логгера для этого модуля
@@ -29,14 +29,23 @@ async def tariff_menu_callback(callback: CallbackQuery) -> None:
 
 
 async def tariff_menu(message: Message, edit: bool = False) -> None:
-    """Отображает меню управления тарифами."""
-    text = "Меню управления тарифами:"
+    """Отображает меню управления тарифами + сводку по существующим тарифам."""
+    async with get_session() as session:
+        tariffs = await get_all_tariffs(session)
+    summary_lines = ["Меню управления тарифами:"]
+    if tariffs:
+        for t in tariffs:
+            summary_lines.append(f"• #{t.id} {t.name} — {t.duration_days} дн / {t.price} ₽")
+    else:
+        summary_lines.append("(пока нет тарифов)")
+    text = "\n".join(summary_lines)
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Добавить тариф", callback_data="add_tariff")
-    builder.button(text="✖️ Удалить тариф", callback_data="delete_tariff_menu")
+    builder.button(text="➕ Добавить", callback_data="add_tariff")
+    if tariffs:
+        builder.button(text="✏ Изменить", callback_data="edit_tariff_pick")
+        builder.button(text="✖ Удалить", callback_data="delete_tariff_menu")
     builder.button(text="⬅️ Назад", callback_data="admin_menu")
     builder.adjust(1)
-
     if edit:
         await message.edit_text(text, reply_markup=builder.as_markup())
     else:
@@ -75,7 +84,7 @@ async def delete_tariff_menu_callback(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "add_tariff")
 async def start_add_tariff(callback: CallbackQuery, state: FSMContext) -> None:
     """Начинает процесс добавления нового тарифа."""
-    await callback.message.edit_text("Введите название нового тарифа:")
+    await callback.message.edit_text("Введите название нового тарифа (или /cancel):")
     await state.set_state(TariffStates.waiting_for_name)
     await callback.answer()
 
@@ -107,7 +116,7 @@ async def process_tariff_name(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(name=message.text.strip())
-    await message.answer("Отлично! Теперь введите длительность тарифа в днях:")
+    await message.answer("Отлично! Теперь введите длительность тарифа в днях (целое число):")
     await state.set_state(TariffStates.waiting_for_days)
 
 
@@ -120,22 +129,17 @@ async def process_tariff_days(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(days=int(message.text))
-    await message.answer("Теперь введите цену тарифа в рублях (например, 99.90):")
+    await message.answer("Теперь введите цену тарифа в рублях (целое число, без копеек, например 199):")
     await state.set_state(TariffStates.waiting_for_price)
 
 
 @router.message(TariffStates.waiting_for_price)
 async def process_tariff_price(message: Message, state: FSMContext) -> None:
     """Обрабатывает ввод цены и создаёт новый тариф."""
-    try:
-        price = float(message.text.replace(",", "."))
-        if not 0 < price < 1000000:
-            raise ValueError
-    except (ValueError, TypeError):
-        await message.answer(
-            "Пожалуйста, введите корректную цену (число, например, 199.50):"
-        )
+    if not (message.text and message.text.isdigit() and 0 < int(message.text) < 1_000_000):
+        await message.answer("Введите корректную ЦЕЛУЮ цену в рублях (1 .. 999999):")
         return
+    price = int(message.text)
 
     data = await state.get_data()
     name = data["name"]
@@ -145,7 +149,7 @@ async def process_tariff_price(message: Message, state: FSMContext) -> None:
         await create_tariff(session, name=name, price=price, duration_days=days)
 
     logger.info(
-        "Админ %d создал новый тариф: %s, %d дней, %.2f RUB",
+        "Админ %d создал новый тариф: %s, %d дней, %d RUB",
         message.from_user.id,
         name,
         days,
@@ -155,9 +159,94 @@ async def process_tariff_price(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"✅ Тариф «{name}» успешно добавлен!\n"
         f"Длительность: {days} дней\n"
-        f"Цена: {price:.2f} ₽"
+        f"Цена: {price} ₽"
     )
     await state.clear()
 
     # Отображаем главное меню тарифов
     await tariff_menu(message=message)
+
+
+# ---------------- Редактирование тарифов ----------------
+@router.callback_query(F.data == "edit_tariff_pick")
+async def edit_tariff_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    async with get_session() as session:
+        tariffs = await get_all_tariffs(session)
+    if not tariffs:
+        await callback.answer("Нет тарифов", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    for t in tariffs:
+        kb.button(text=f"#{t.id} {t.name}", callback_data=f"edit_tariff:{t.id}")
+    kb.button(text="⬅ Назад", callback_data="tariff_menu")
+    kb.adjust(1)
+    await callback.message.edit_text("Выберите тариф для редактирования:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_tariff:"))
+async def edit_tariff_field_select(callback: CallbackQuery, state: FSMContext) -> None:
+    tariff_id = int(callback.data.split(":", 1)[1])
+    await state.update_data(edit_tariff_id=tariff_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📝 Имя", callback_data="edit_field:name")
+    kb.button(text="⏱ Дни", callback_data="edit_field:days")
+    kb.button(text="💰 Цена", callback_data="edit_field:price")
+    kb.button(text="⬅ Назад", callback_data="tariff_menu")
+    kb.adjust(2, 2, 1)
+    await callback.message.edit_text(f"Что изменить в тарифе #{tariff_id}?", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_field:"))
+async def edit_tariff_start(callback: CallbackQuery, state: FSMContext) -> None:
+    field = callback.data.split(":", 1)[1]
+    await state.update_data(edit_field=field)
+    prompt_map = {
+        "name": "Введите новое имя тарифа:",
+        "days": "Введите новую длительность (целое число дней):",
+        "price": "Введите новую цену (целое число руб.):",
+    }
+    await state.set_state(TariffStates.editing_new_value)
+    await callback.message.edit_text(prompt_map[field])
+    await callback.answer()
+
+
+@router.message(TariffStates.editing_new_value)
+async def process_edit_value(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    tariff_id = data.get("edit_tariff_id")
+    field = data.get("edit_field")
+    if not tariff_id or not field:
+        await message.answer("Состояние потеряно. Вернитесь в меню тарифов: /admin")
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    update_kwargs = {}
+    if field == "name":
+        if not raw or len(raw) > 50:
+            await message.answer("Некорректное имя (1..50 символов). Повторите:")
+            return
+        update_kwargs["name"] = raw
+    elif field == "days":
+        if not raw.isdigit() or not (0 < int(raw) < 10000):
+            await message.answer("Некорректное число дней. Повторите:")
+            return
+        update_kwargs["duration_days"] = int(raw)
+    elif field == "price":
+        if not raw.isdigit() or not (0 < int(raw) < 1_000_000):
+            await message.answer("Некорректная цена. Повторите:")
+            return
+        update_kwargs["price"] = int(raw)
+    else:
+        await message.answer("Неизвестное поле.")
+        await state.clear()
+        return
+    async with get_session() as session:
+        tariff = await update_tariff(session, tariff_id, **update_kwargs)
+    if not tariff:
+        await message.answer("Тариф не найден.")
+    else:
+        await message.answer("✅ Изменено.")
+    await state.clear()
+    await tariff_menu(message)

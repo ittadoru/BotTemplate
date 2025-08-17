@@ -27,17 +27,23 @@ services:
       - postgres
     command: >
       bash -c "
-        while ! pg_isready -h postgres -p 5432 -q -U templateuser; do
-          echo 'Waiting for database...'
+        while ! pg_isready -h postgres -p 5432 -q -U ${POSTGRES_USER}; do
+          echo 'Waiting for database...';
           sleep 1
         done;
         echo 'Database is ready!';
-        alembic upgrade head && watchfiles --filter python 'python bot.py'
+        if ls alembic/versions/*.py 1> /dev/null 2>&1; then
+          echo 'Found Alembic revisions -> running alembic upgrade head';
+          alembic upgrade head || { echo 'Alembic upgrade failed'; exit 1; }
+        else
+          echo 'No Alembic revisions -> running ensure_schema.py fallback';
+          python scripts/ensure_schema.py || { echo 'ensure_schema failed'; exit 1; }
+        fi;
+        watchfiles --filter python 'python bot.py'
       "
 
   server:
-    build: .
-    image: saverbot-app
+    image: saverbot-app  # используем уже собранный образ, не билдим второй раз
     container_name: server
     restart: always
     working_dir: /app
@@ -48,7 +54,19 @@ services:
     depends_on:
       - postgres
     command: >
-      bash -c "uvicorn server:app --host 0.0.0.0 --port 8000 --reload"
+      bash -c "
+        while ! pg_isready -h postgres -p 5432 -q -U ${POSTGRES_USER}; do
+          echo 'Waiting for database (server)...';
+          sleep 1
+        done;
+        if ls alembic/versions/*.py 1> /dev/null 2>&1; then
+          echo 'Server: Alembic revisions present (assume schema migrated by app).';
+        else
+          echo 'Server: ensure_schema fallback (idempotent).';
+          python scripts/ensure_schema.py || true
+        fi;
+        uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+      "
 
 volumes:
   pgdata:

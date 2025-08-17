@@ -28,6 +28,29 @@ async def create_tariff(
     return new_tariff
 
 
+async def update_tariff(
+    session: AsyncSession,
+    tariff_id: int,
+    *,
+    name: str | None = None,
+    price: int | None = None,
+    duration_days: int | None = None,
+) -> Tariff | None:
+    """Обновляет указанные поля тарифа. Возвращает обновлённый тариф или None."""
+    tariff = await session.get(Tariff, tariff_id)
+    if not tariff:
+        return None
+    if name is not None:
+        tariff.name = name
+    if price is not None:
+        tariff.price = price
+    if duration_days is not None:
+        tariff.duration_days = duration_days
+    await session.commit()
+    await session.refresh(tariff)
+    return tariff
+
+
 async def delete_tariff(session: AsyncSession, tariff_id: int) -> bool:
     """
     Удаляет тариф по его ID.
