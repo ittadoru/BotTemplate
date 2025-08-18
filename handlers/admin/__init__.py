@@ -23,5 +23,5 @@ routers = [
     log_router,
     tariff_router,
     table_export_router,
-    channels_router
+    channels_router,
 ]

@@ -4,22 +4,6 @@
 - Общей рассылкой (всем)
 - Рекламной (без активной подписки)
 - Неплатившие (has_paid_ever = false)
-
-Использование:
-    from utils.broadcast_base import register_broadcast_constructor
-    router = Router()
-    async def audience_fetcher(): ...  # -> list[int]
-    register_broadcast_constructor(
-        router,
-        start_trigger="broadcast_start",
-        prefix="broadcast",
-        title="📢 **Конструктор общей рассылки**",
-        send_button_label="🚀 Отправить",
-        start_status_text="⏳ Рассылка всем пользователям начинается...",
-        summary_title="✅ **Общая рассылка завершена!**",
-        total_label="Всего пользователей для рассылки",
-        audience_fetcher=audience_fetcher,
-    )
 """
 from __future__ import annotations
 

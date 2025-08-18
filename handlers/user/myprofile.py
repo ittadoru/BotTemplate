@@ -7,6 +7,8 @@ from aiogram.types import CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 from db.base import get_session
 from db.subscribers import get_subscriber_expiry
+from handlers.user.referral import get_referral_stats
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +31,36 @@ def _format_subscription_status(expire_at: datetime | None) -> str:
         return "❌ Подписка не активна"
     now = datetime.now(expire_at.tzinfo)
     if expire_at > now:
+        if expire_at.year > 2124:
+            return "✅ Подписка: <b>бессрочная</b>"
         return f"✅ Подписка активна до <b>{expire_at.strftime('%d.%m.%Y %H:%M')}</b>"
     return "❌ Подписка истекла"
 
 
 def _build_profile_text(user_id: int, name: str, username: str, status: str) -> str:
-    """Формирует текст профиля."""
     username_part = f"@{username}" if username else "—"
-    return (
-        "<b>👤 Пользователь:</b>\n\n"
+    stats = (
+        f"<b>👤 Пользователь:</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Имя: {name}\n"
         f"{status}\n"
-        f"Username: {username_part}\n"
+        f"Username: {username_part}"
+    )
+    return stats
+
+def _build_referral_text(ref_count: int, level: int, to_next: str) -> str:
+    level_names = {
+        0: "Нет уровня",
+        1: "1",
+        2: "2 (увеличенный лимит)",
+        3: "3 (VIP)",
+        4: "4 (бессрочная подписка)"
+    }
+    return (
+        f"\n<b>Реферальная программа:</b>"
+        f"\n<b>Твой уровень:</b> {level_names[level]}"
+        f"\n<b>Рефералов:</b> {ref_count}"
+        f"\n{to_next}\n"
     )
 
 
@@ -55,10 +74,15 @@ async def show_profile(callback: CallbackQuery) -> None:
 
     async with get_session() as session:
         expire_at = await get_subscriber_expiry(session, user_id)
+        # --- Реферальная информация ---
+        ref_count, level, _ = await get_referral_stats(session, user_id)
+        next_level = {0: 1, 1: 3, 2: 10, 3: 30, 4: None}[level]
+        to_next = f"До следующего уровня: {next_level - ref_count} рефералов" if next_level else "Максимальный уровень!"
+
     status = _format_subscription_status(expire_at)
     text = _build_profile_text(user_id, name, username, status)
+    text += _build_referral_text(ref_count, level, to_next)
 
-    # Если текст уже такой же — не редактируем (чтобы не ловить ошибку)
     current = (callback.message.text or "").strip()
     if current == text.strip():
         await callback.answer()
@@ -76,7 +100,6 @@ async def show_profile(callback: CallbackQuery) -> None:
                 "Подавлена ошибка 'message is not modified' (user_id=%d)", user_id
             )
             return
-        # На другие ошибки пусть видно в логах
         logger.exception("Не удалось обновить профиль user_id=%d", user_id)
         raise
 
