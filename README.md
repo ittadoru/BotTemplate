@@ -33,7 +33,7 @@ docker compose logs -f app  # смотреть логи
 * Бот: открыть в Telegram (по токену BOT_TOKEN)
 * Webhook оплат (YooKassa): `https://DOMAIN/yookassa` (DOMAIN в `.env`)
 
-## Проблемы
+## ⛔️ Возможные проблемы
 Если выходит ошибка, связанная с миграциями и sqlalchemy, то следует остановить контейнер, удалить базу данных в volume, удалить все миграции в папке alembic/versions (если есть), и в контейнере posgresql в ручную создать миграцию с нуля:
 ```bash
 docker compose down
