@@ -28,3 +28,16 @@ SHOP_ID = int(os.getenv("SHOP_ID"))        # ID магазина YooKassa
 API_KEY = os.getenv("API_KEY")            # Секретный ключ API
 DOMAIN = os.getenv("DOMAIN")              # Базовый домен (для ссылок/вебхуков)
 
+# ---------------------------------------------------------------------------
+# Загрузка файлов
+# ---------------------------------------------------------------------------
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
+
+# ---------------------------------------------------------------------------
+# Лимиты
+# ---------------------------------------------------------------------------
+SUBSCRIPTION_YEARS_FOR_LIFETIME = 100
+SUBSCRIPTION_LIFETIME_DAYS = SUBSCRIPTION_YEARS_FOR_LIFETIME * 365
+
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+

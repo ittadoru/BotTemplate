@@ -14,7 +14,7 @@ from db.promocodes import add_promocode, get_promocode
 from db.users import add_or_update_user, is_user_exists, log_user_activity
 from db.subscribers import add_subscriber_with_duration
 from handlers.user.referral import get_referral_stats
-
+from config import SUBSCRIPTION_LIFETIME_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ async def cmd_start(message: types.Message) -> None:
                     ref_count, level, _ = await get_referral_stats(session, referrer_id)
                     if level == 4:
                         # Бессрочная подписка: 100 лет = 36500 дней
-                        await add_subscriber_with_duration(session, referrer_id, 36500)
+                        await add_subscriber_with_duration(session, referrer_id, SUBSCRIPTION_LIFETIME_DAYS)
                         try:
                             await message.bot.send_message(referrer_id, "🎉 Поздравляем! Вы достигли 4 уровня и получили бессрочную подписку!")
                         except Exception:
