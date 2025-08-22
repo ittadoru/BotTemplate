@@ -1,20 +1,17 @@
 """Активация промокодов: ввод, валидация, активация, повторные попытки и отмена."""
 
-from __future__ import annotations
-
 import logging
 import re
-from typing import Any
 
 from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import TelegramBadRequest
 
 from db.base import get_session
 from db.promocodes import activate_promocode
 from db.subscribers import get_subscriber_expiry
 from states.promo import PromoStates
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +53,18 @@ def _build_same_code_message() -> str:
     return "ℹ️ Этот код уже проверяли. Введите другой или Отмена."
 
 
-async def _safe_delete(bot: Any, chat_id: int, message_id: int) -> None:
+async def _safe_delete(bot, chat_id: int, message_id: int) -> None:
     try:
         await bot.delete_message(chat_id, message_id)
-    except TelegramBadRequest:
-        pass
-    except Exception:  # noqa: BLE001
-        logger.debug("Не удалось удалить сообщение %s", message_id, exc_info=True)
+    except Exception:
+        logger.debug("🗑️ [PROMO] Не удалось удалить сообщение %s", message_id, exc_info=True)
 
 
 @router.callback_query(F.data == "promo")
 async def promo_start(callback: types.CallbackQuery, state: FSMContext) -> None:
     await _show_promo_prompt(callback.message, state)
     await callback.answer()
-    logger.debug("Старт ввода промокода user_id=%d", callback.from_user.id)
+    logger.debug("🎟️ [PROMO] Старт ввода промокода user_id=%d", callback.from_user.id)
 
 @router.message(F.text == "/promocode")
 async def promo_command(message: types.Message, state: FSMContext) -> None:
@@ -97,19 +92,13 @@ async def promo_cancel(callback: types.CallbackQuery, state: FSMContext) -> None
     if last_id:
         await _safe_delete(callback.bot, callback.message.chat.id, last_id)
     await callback.answer("Отменено")
-    logger.info("Отмена ввода промокода user_id=%d", callback.from_user.id)
+    logger.info("❌ [PROMO] Отмена ввода промокода user_id=%d", callback.from_user.id)
 
 
 @router.message(PromoStates.user)
 async def process_user_promocode(message: types.Message, state: FSMContext) -> None:
-    """Обрабатывает введённый промокод: валидация, активация, ответ.
-
-    Логика:
-      1. Нормализуем код.
-      2. Проверяем формат / повтор.
-      3. Пытаемся активировать.
-      4. Редактируем приглашение (если есть); иначе отправляем новое.
-      5. При успехе завершаем состояние, при неудаче ждём новый ввод.
+    """
+    Обрабатывает введённый промокод: валидация, активация, ответ.
     """
     if not message.text:
         await message.answer("Введите текстовый промокод или нажмите Отмена.")
@@ -155,7 +144,7 @@ async def process_user_promocode(message: types.Message, state: FSMContext) -> N
         success = False
 
     logger.info(
-        "promo_attempt user_id=%d code=%s success=%s duration=%s",  # краткий лог
+        "🎟️ [PROMO] Попытка активации промокода user_id=%d code=%s success=%s duration=%s",
         user.id,
         code,
         success,
@@ -186,22 +175,14 @@ async def _respond_update(
       - success=True удаляет клавиатуру.
     """
     if bot_msg_id:
-        try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=bot_msg_id,
-                text=text,
-                reply_markup=None if success else _prompt_keyboard(),
-                parse_mode="HTML",
-            )
-            return
-        except TelegramBadRequest as e:
-            low = str(e).lower()
-            if "message is not modified" in low:
-                logger.debug("Промо: текст не изменился, пропускаем update (chat=%d)", message.chat.id)
-                return
-            if "message to edit not found" not in low:
-                logger.debug("edit_message_text fallback: %s", e)
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=bot_msg_id,
+            text=text,
+            reply_markup=None if success else _prompt_keyboard(),
+            parse_mode="HTML",
+        )
+        return
     sent = await message.answer(
         text,
         parse_mode="HTML",

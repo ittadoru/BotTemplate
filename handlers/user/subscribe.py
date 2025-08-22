@@ -1,10 +1,6 @@
 """Подписка: выбор тарифа и генерация ссылки на оплату."""
-
-from __future__ import annotations
-
 import logging
 from contextlib import suppress
-from typing import Optional
 
 from aiogram import F, Router, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -21,16 +17,17 @@ router = Router()
 BUY_PREFIX = "buy_tariff:"
 PARSE_MODE = "HTML"
 SUBSCRIBE_HEADER = (
-    "<b>💎 Преимущества подписки:</b>\n"
-    "• Приоритетная поддержка\n\n"
+    "<b>💎 Преимущества подписки:</b>\n\n"
+    "• Нет рекламы\n"
+    "• Не требуется подписка на каналы\n"
     "Выберите вариант подписки:"
 )
-
 
 def _build_tariffs_keyboard(tariffs) -> types.InlineKeyboardMarkup:
     """Строит клавиатуру тарифов с кнопкой назад."""
     builder = InlineKeyboardBuilder()
-    for t in tariffs:
+    # Сортировка тарифов по цене по возрастанию
+    for t in sorted(tariffs, key=lambda x: x.price):
         builder.button(
             text=f"{t.name} — {t.price} RUB",
             callback_data=f"{BUY_PREFIX}{t.id}"
@@ -47,20 +44,17 @@ async def subscribe_handler_callback(callback: types.CallbackQuery) -> None:
 
 @router.message(F.text == "/subscribe")
 async def subscribe_handler_command(message: types.Message) -> None:
-    await _show_subscribe_menu(message)
+    await _show_subscribe_menu(message, is_command=True)
 
-async def _show_subscribe_menu(message: types.Message, callback: types.CallbackQuery = None) -> None:
+async def _show_subscribe_menu(message: types.Message, callback: types.CallbackQuery = None, is_command=False) -> None:
     """Показывает список тарифов или сообщение об их отсутствии."""
     async with get_session() as session:
         tariffs = await get_all_tariffs(session)
 
     if not tariffs:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="⬅️ Назад", callback_data="profile")
         with suppress(TelegramAPIError):
-            await message.edit_text(
+            await message.answer(
                 "Пока нет доступных тарифов.",
-                reply_markup=kb.as_markup(),
                 parse_mode=PARSE_MODE,
             )
         if callback:
@@ -68,7 +62,7 @@ async def _show_subscribe_menu(message: types.Message, callback: types.CallbackQ
         return
 
     new_text = SUBSCRIBE_HEADER
-    if isinstance(message, types.Message):
+    if is_command:
         send = message.answer
     else:
         send = message.edit_text
@@ -87,7 +81,6 @@ async def payment_callback_handler(callback: types.CallbackQuery) -> None:
     """Создаёт платёж и выдаёт кнопку оплаты тарифа."""
     user_id = callback.from_user.id
     raw = callback.data or ""
-    tariff_id: Optional[int] = None
     try:
         tariff_id = int(raw.removeprefix(BUY_PREFIX))
     except ValueError:
@@ -113,16 +106,15 @@ async def payment_callback_handler(callback: types.CallbackQuery) -> None:
             }
         )
         logger.info(
-            "Создан платёж %s для user=%s tariff=%s price=%s", payment_id, user_id, tariff.id, tariff.price
+            "💸 [SUBSCRIBE] Создан платёж %s для user=%s tariff=%s price=%s", payment_id, user_id, tariff.id, tariff.price
         )
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Ошибка создания платежа для user=%s tariff=%s", user_id, tariff_id)
-        await callback.answer("Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+    except Exception as e:
+        logger.exception("❌ [SUBSCRIBE] Ошибка создания платежа для user=%s tariff=%s", user_id, tariff_id)
+        await callback.message.answer("Ошибка создания платежа. Попробуйте позже.", show_alert=True)
         return
 
     markup = InlineKeyboardBuilder()
-    markup.button(text="🪙 Оплатить", url=payment_url)
-    markup.button(text="⬅️ Назад", callback_data="subscribe")
+    markup.button(text="💸 Оплатить", url=payment_url)
     markup.adjust(1)
 
     with suppress(TelegramAPIError):

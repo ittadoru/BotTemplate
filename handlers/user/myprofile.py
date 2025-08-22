@@ -4,16 +4,12 @@ from datetime import datetime
 import logging
 from aiogram import Router, types
 from aiogram.types import CallbackQuery
-from aiogram.exceptions import TelegramBadRequest
 from db.base import get_session
 from db.subscribers import get_subscriber_expiry
 from handlers.user.referral import get_referral_stats
 
 
-logger = logging.getLogger(__name__)
-
 router = Router()
-
 
 def _build_profile_keyboard() -> types.InlineKeyboardMarkup:
     """Возвращает клавиатуру профиля."""
@@ -44,22 +40,24 @@ def _build_profile_text(user_id: int, name: str, username: str, status: str) -> 
         f"ID: <code>{user_id}</code>\n"
         f"Имя: {name}\n"
         f"{status}\n"
-        f"Username: {username_part}"
+        f"Username: {username_part}\n\n"
     )
+
     return stats
 
-def _build_referral_text(ref_count: int, level: int, to_next: str) -> str:
+def _build_referral_text(ref_count: int, level: int, to_next: str, progress_bar: str = "") -> str:
     level_names = {
-        0: "Нет уровня",
-        1: "1",
-        2: "2 (увеличенный лимит)",
-        3: "3 (VIP)",
-        4: "4 (бессрочная подписка)"
+        1: "1 (базовый)",
+        2: "2 (1 реферал)",
+        3: "3 (3 реферала)",
+        4: "4 (10 рефералов)",
+        5: "5 (30 рефералов)"
     }
     return (
-        f"\n<b>Реферальная программа:</b>"
-        f"\n<b>Твой уровень:</b> {level_names[level]}"
+        f"\n\n<b>Реферальная программа:</b>\n"
+        f"\n<b>Твой уровень:</b> {level_names.get(level, '—')}"
         f"\n<b>Рефералов:</b> {ref_count}"
+        f"\n{progress_bar}"
         f"\n{to_next}\n"
     )
 
@@ -70,38 +68,40 @@ async def show_profile(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
     name = callback.from_user.first_name or "Без имени"
     username = callback.from_user.username or ""
-    logger.debug("Открыт профиль пользователем user_id=%d", user_id)
 
     async with get_session() as session:
         expire_at = await get_subscriber_expiry(session, user_id)
-        # --- Реферальная информация ---
+
         ref_count, level, _ = await get_referral_stats(session, user_id)
-        next_level = {0: 1, 1: 3, 2: 10, 3: 30, 4: None}[level]
-        to_next = f"До следующего уровня: {next_level - ref_count} рефералов" if next_level else "Максимальный уровень!"
+        # Новая логика перехода между уровнями
+        next_level_map = {1: 2, 2: 3, 3: 4, 4: 5, 5: None}
+        next_level_reqs = {2: 1, 3: 3, 4: 10, 5: 30}
+        prev_level_min = {1: 0, 2: 1, 3: 3, 4: 10, 5: 30}[level]
+        next_level = next_level_map.get(level)
+        if next_level:
+            need = next_level_reqs[next_level] - prev_level_min
+            have = max(0, ref_count - prev_level_min)
+            to_next = f"До следующего уровня: {next_level_reqs[next_level] - ref_count} рефералов"
+            # Прогресс-бар
+            bar_len = 8
+            filled = min(bar_len, int(bar_len * have / need)) if need > 0 else bar_len
+            empty = bar_len - filled
+            progress_bar = f"Прогресс: {'🟩'*filled}{'⬜️'*empty} ({have}/{need})"
+        else:
+            to_next = "Максимальный уровень!"
+            progress_bar = ""
+
 
     status = _format_subscription_status(expire_at)
     text = _build_profile_text(user_id, name, username, status)
-    text += _build_referral_text(ref_count, level, to_next)
+    text += _build_referral_text(ref_count, level, to_next, progress_bar)
 
     current = (callback.message.text or "").strip()
     if current == text.strip():
         await callback.answer()
-        logger.debug("Профиль без изменений (user_id=%d)", user_id)
         return
 
-    try:
-        await callback.message.edit_text(
-            text, parse_mode="HTML", reply_markup=_build_profile_keyboard()
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e).lower():
-            await callback.answer()
-            logger.debug(
-                "Подавлена ошибка 'message is not modified' (user_id=%d)", user_id
-            )
-            return
-        logger.exception("Не удалось обновить профиль user_id=%d", user_id)
-        raise
-
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_build_profile_keyboard()
+    )
     await callback.answer()
-    logger.info("Профиль показан user_id=%d", user_id)

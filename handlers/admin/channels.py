@@ -5,7 +5,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from sqlalchemy.exc import ProgrammingError
 from states.channels import ChannelStates
 from aiogram.fsm.context import FSMContext
-
+import logging
 from config import ADMINS
 from db.base import get_session
 from db.channels import (
@@ -18,6 +18,7 @@ from db.channels import (
     toggle_channel_guard,
 )
 
+logger = logging.getLogger(__name__)
 router = Router()
 router.message.filter(F.from_user.id.in_(ADMINS))
 router.callback_query.filter(F.from_user.id.in_(ADMINS))
@@ -60,7 +61,6 @@ def _channels_menu_kb(channels, guard_on: bool):
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
     return b.as_markup()
 
-
 @router.callback_query(F.data == "channels_menu")
 async def show_channels_menu(callback: CallbackQuery):
     """
@@ -78,8 +78,6 @@ async def show_channels_menu(callback: CallbackQuery):
         )
     await callback.answer()
 
-
-# --- Toggle handlers ---
 @router.callback_query(F.data.startswith("ch_toggle_req:"))
 async def toggle_required(callback: CallbackQuery):
     """
@@ -91,6 +89,7 @@ async def toggle_required(callback: CallbackQuery):
         channels = await list_channels(session)
         text = await _channels_menu_text(session)
         guard_on = await is_channel_guard_enabled(session)
+    logger.info(f"🔄 [CHANNELS] Переключена обязательность канала {ch_id} админом {callback.from_user.id}")
     await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on), parse_mode="HTML")
     await callback.answer()
 
@@ -106,9 +105,9 @@ async def toggle_active(callback: CallbackQuery):
         channels = await list_channels(session)
         text = await _channels_menu_text(session)
         guard_on = await is_channel_guard_enabled(session)
+    logger.info(f"🔄 [CHANNELS] Переключена активность канала {ch_id} админом {callback.from_user.id}")
     await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on), parse_mode="HTML")
     await callback.answer()
-
 
 @router.callback_query(F.data.startswith("ch_del:"))
 async def delete_ch(callback: CallbackQuery):
@@ -121,9 +120,9 @@ async def delete_ch(callback: CallbackQuery):
         channels = await list_channels(session)
         text = await _channels_menu_text(session)
         guard_on = await is_channel_guard_enabled(session)
+    logger.info(f"🗑️ [CHANNELS] Удалён канал {ch_id} админом {callback.from_user.id}")
     await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on), parse_mode="HTML")
     await callback.answer()
-
 
 @router.callback_query(F.data == "ch_toggle_guard")
 async def toggle_guard(callback: CallbackQuery):
@@ -135,11 +134,9 @@ async def toggle_guard(callback: CallbackQuery):
         channels = await list_channels(session)
         text = await _channels_menu_text(session)
         guard_on = await is_channel_guard_enabled(session)
+    logger.info(f"🌐 [CHANNELS] Переключено глобальное ограничение каналов админом {callback.from_user.id}")
     await callback.message.edit_text(text, reply_markup=_channels_menu_kb(channels, guard_on), parse_mode="HTML")
     await callback.answer()
-
-
-# --- Add channel flow ---
 
 @router.callback_query(F.data == "ch_add_start")
 async def add_start(callback: CallbackQuery, state: FSMContext):
@@ -153,7 +150,6 @@ async def add_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Обработчик текстового сообщения для добавления канала
 @router.message(ChannelStates.waiting_for_username)
 async def process_channel_username(message: Message, state: FSMContext):
     """
@@ -166,7 +162,9 @@ async def process_channel_username(message: Message, state: FSMContext):
     async with get_session() as session:
         try:
             await add_channel(session, username)
+            logger.info(f"➕ [CHANNELS] Добавлен канал @{username} админом {message.from_user.id}")
             await message.answer(f"✅ Канал <b>@{username}</b> успешно добавлен!")
         except Exception as e:
+            logger.warning(f"❗️ [CHANNELS] Ошибка при добавлении канала @{username} админом {message.from_user.id}: {e}")
             await message.answer(f"⚠️ Ошибка при добавлении: {e}")
     await state.clear()

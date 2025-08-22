@@ -1,9 +1,10 @@
 """Экспорт таблиц: динамический CSV любой модели SQLAlchemy через инлайн-меню."""
 
 import csv
-import io
 import logging
 from datetime import datetime
+import aiofiles
+import io
 
 from aiogram import F, Router
 from aiogram.filters.callback_data import CallbackData
@@ -11,13 +12,11 @@ from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 
-# Это гарантирует, что все модели будут зарегистрированы в Base.registry
-# до того, как мы попытаемся их получить.
 import db
 from db.base import Base, get_session
 
+logger = logging.getLogger(__name__)
 router = Router()
-
 
 class TableExportCallback(CallbackData, prefix="export"):
     """Фабрика колбэков для экспорта таблиц."""
@@ -70,7 +69,6 @@ async def export_table_menu(callback: CallbackQuery) -> None:
 def format_value(value):
     """Форматирует значения для корректной записи в CSV."""
     if isinstance(value, datetime):
-        # Приводим дату к локальному времени и форматируем
         return value.astimezone().strftime('%Y-%m-%d %H:%M:%S')
     if value is None:
         return ""
@@ -86,7 +84,6 @@ async def export_table_handler(callback: CallbackQuery, callback_data: TableExpo
     await callback.answer(f"⏳ Готовим экспорт таблицы <b>{table_name}</b>...", show_alert=False)
 
     try:
-        # Находим модель по имени таблицы
         model_mapper = next((m for m in get_all_models() if m.class_.__tablename__ == table_name), None)
 
         if not model_mapper:
@@ -96,7 +93,6 @@ async def export_table_handler(callback: CallbackQuery, callback_data: TableExpo
         model_class = model_mapper.class_
 
         async with get_session() as session:
-            # Выбираем все данные из таблицы
             result = await session.execute(select(model_class))
             rows = result.scalars().all()
 
@@ -110,34 +106,42 @@ async def export_table_handler(callback: CallbackQuery, callback_data: TableExpo
                 await callback.answer()
                 return
 
-            # Получаем заголовки из колонок модели
             headers = [c.name for c in model_class.__table__.columns]
 
-        # Создаем CSV в памяти
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-
-        # Записываем заголовки
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(headers)
-
-        # Записываем строки
         for row_obj in rows:
             writer.writerow([format_value(getattr(row_obj, h)) for h in headers])
+        csv_text = csv_buffer.getvalue()
+        csv_buffer.close()
+        async with aiofiles.tempfile.NamedTemporaryFile('w+', encoding='utf-8', delete=False) as tmp:
+            await tmp.write(csv_text)
+            await tmp.flush()
+            tmp_path = tmp.name
 
-        output.seek(0)
-        csv_data = output.getvalue().encode('utf-8')
+        async with aiofiles.open(tmp_path, 'rb') as f:
+            csv_data = await f.read()
 
-        # Отправляем файл
+        if not csv_data or len(csv_data) == 0:
+            await callback.answer(
+                f"ℹ️ <b>Таблица <code>{table_name}</code> пуста или файл не создан.</b>",
+                show_alert=True
+            )
+            await aiofiles.os.remove(tmp_path)
+            return
         file = BufferedInputFile(csv_data, filename=f"{table_name}.csv")
         await callback.message.answer_document(
             file,
             caption=f"📄 <b>Экспорт таблицы:</b> <code>{table_name}.csv</code>",
             parse_mode="HTML"
         )
+        logger.info(f"📤 [EXPORT] Таблица '{table_name}' экспортирована пользователю {callback.from_user.id}")
         await callback.answer("✅ Файл успешно отправлен!", show_alert=False)
+        await aiofiles.os.remove(tmp_path)
 
     except Exception as e:
-        logging.error(f"Ошибка при экспорте таблицы {table_name}: {e}", exc_info=True)
+        logger.error(f"Ошибка при экспорте таблицы {table_name}: {e}", exc_info=True)
         await callback.answer(
             f"❌ <b>Произошла ошибка при экспорте таблицы <code>{table_name}</code>.</b>\nПроверьте логи.",
             show_alert=True

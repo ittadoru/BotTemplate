@@ -1,9 +1,3 @@
-"""
-Модели пользователя и активности: регистрация/обновление, логирование, выборки и статистика.
-Включает подробные docstring, type hints, __repr__ и безопасную обработку транзакций.
-"""
-
-
 import datetime
 from typing import Optional
 
@@ -14,7 +8,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from db.base import Base
 from db.subscribers import Subscriber
-
 
 
 class User(Base):
@@ -179,7 +172,6 @@ async def mark_user_has_paid(session: AsyncSession, user_id: int) -> None:
     """
     now = datetime.datetime.now(datetime.timezone.utc)
     user = await session.get(User, user_id)
-    from sqlalchemy.exc import SQLAlchemyError
     try:
         if user:
             if not user.has_paid_ever:
@@ -216,13 +208,16 @@ async def is_user_exists(session: AsyncSession, user_id: int) -> bool:
 
 async def get_user_ids_without_subscription(session: AsyncSession) -> list[int]:
     """
-    Возвращает список ID пользователей, у которых нет активной подписки.
-    Использует LEFT JOIN для эффективного поиска.
+    Возвращает список ID пользователей, у которых нет активной подписки (нет подписки или истекла).
     """
+    now = datetime.now(datetime.timezone.utc)
     query = (
         select(User.id)
         .outerjoin(Subscriber, User.id == Subscriber.user_id)
-        .where(Subscriber.user_id.is_(None))
+        .where(
+            (Subscriber.user_id.is_(None)) |
+            (Subscriber.expire_at <= now)
+        )
     )
     result = await session.execute(query)
     return list(result.scalars().all())
@@ -238,3 +233,51 @@ async def log_user_activity(session: AsyncSession, user_id: int) -> None:
     except SQLAlchemyError:
         await session.rollback()
         raise
+
+
+async def get_top_referrers(session: AsyncSession, limit: int = 10):
+    """
+    Возвращает топ пользователей по количеству рефералов (id, username, ref_count, уровень).
+    """
+    # Подсчёт количества рефералов для каждого пользователя
+    subq = (
+        select(User.referrer_id.label('referrer_id'), func.count(User.id).label('ref_count'))
+        .where(User.referrer_id.isnot(None))
+        .group_by(User.referrer_id)
+        .subquery()
+    )
+    # Присоединяем к User, чтобы получить username и id
+    query = (
+        select(
+            User.id,
+            User.username,
+            subq.c.ref_count
+        )
+        .join(subq, User.id == subq.c.referrer_id)
+        .order_by(subq.c.ref_count.desc())
+        .limit(limit)
+    )
+    result = await session.execute(query)
+    rows = result.all()
+    # Для каждого — вычисляем уровень (по вашей логике)
+    top = []
+    for row in rows:
+        ref_count = row.ref_count or 0
+        # Логика уровней (совпадает с get_referral_stats)
+        if ref_count >= 30:
+            level = 5
+        elif ref_count >= 10:
+            level = 4
+        elif ref_count >= 3:
+            level = 3
+        elif ref_count >= 1:
+            level = 2
+        else:
+            level = 1
+        top.append(type('TopRef', (), {
+            'id': row.id,
+            'username': row.username,
+            'ref_count': ref_count,
+            'level': level
+        }))
+    return top

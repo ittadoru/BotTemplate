@@ -1,12 +1,9 @@
 """Статистика админа: агрегированные метрики пользователей, подписок и промокодов."""
-
-import logging
-
-
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 
+import logging
 from db.base import get_session
 from db.promocodes import get_active_promocodes_count
 from db.subscribers import (
@@ -43,7 +40,6 @@ async def handle_stats(callback: CallbackQuery) -> None:
             subs_today = await get_subscriptions_count_for_period(session, days=1)
             subs_week = await get_subscriptions_count_for_period(session, days=7)
             subs_month = await get_subscriptions_count_for_period(session, days=30)
-
 
     except Exception as e:
         logging.error(f"Ошибка при получении статистики: {e}", exc_info=True)

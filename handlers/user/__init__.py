@@ -1,3 +1,4 @@
+
 from .about import router as about_router
 from .start import router as start_router
 from .promo import router as promo_router
@@ -5,6 +6,7 @@ from .subscribe import router as subscribe_router
 from .myprofile import router as myprofile_router
 from .menu import router as menu_router
 from .referral import router as referral_router
+from .referral_info import router as referral_info_router
 
 routers = [
     about_router,
@@ -13,5 +15,6 @@ routers = [
     subscribe_router,
     myprofile_router,
     menu_router,
-    referral_router
+    referral_router,
+    referral_info_router
 ]

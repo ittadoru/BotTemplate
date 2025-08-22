@@ -8,8 +8,6 @@ from logging.handlers import TimedRotatingFileHandler
 from aiogram import Bot
 from colorlog import ColoredFormatter
 
-from config import PRIMARY_ADMIN_ID
-
 
 class TelegramErrorHandler(logging.Handler):
     """Кастомный обработчик для отправки критических логов в Telegram."""
@@ -33,28 +31,36 @@ class TelegramErrorHandler(logging.Handler):
         if len(log_entry) > 4000:
             log_entry = log_entry[:4000] + "\n... (сообщение обрезано)"
 
-        try:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(
-                    self.bot.send_message(
-                        chat_id=PRIMARY_ADMIN_ID,
-                        text=f"🆘 <b>Обнаружена ошибка:</b>\n\n<pre>{log_entry}</pre>",
-                        parse_mode="HTML"
-                    )
-                )
-                self.last_sent_time = current_time
-            except RuntimeError:
-                logging.getLogger(__name__).warning(
-                    "Не удалось отправить лог в Telegram: event loop не запущен."
-                )
-        except Exception as e:
-            logging.getLogger(__name__).exception(
-                f"Не удалось отправить лог ошибки в Telegram: {e}"
-            )
+class YTDlpLoggerAdapter:
+    """Минимальный адаптер: убран вывод прогресса и процентов.
 
+    Только пробрасывает info/warning/error. debug подавляется, чтобы не засорять логи.
+    Если понадобится вернуть прогресс — его можно восстановить из git истории.
+    """
+    def __init__(self):
+        self._logger = get_logger("yt_dlp")
 
+    def info(self, msg):
+        return
+    
+    def warning(self, msg):
+        # Фильтруем шумные предупреждения yt-dlp
+        msg_str = str(msg)
+        if (
+            'nsig extraction failed' in msg_str
+            or 'Falling back to generic n function search' in msg_str
+            or 'player =' in msg_str
+            or 'n =' in msg_str
+        ):
+            return
+        self._logger.warning("[YTDLP] %s", msg)
+
+    def error(self, msg):
+        self._logger.error("[YTDLP] %s", msg)
+
+    def debug(self, msg):
+        return
+    
 def custom_rotator(source, dest):
     """Переименовывает архивные логи в формат bot_YYYY-MM-DD.log."""
     dirname, basename = os.path.split(dest)
@@ -147,22 +153,37 @@ def setup_logger(bot: Bot = None):
     logging.info("Система логирования успешно настроена. (SQLALCHEMY_LOG_LEVEL=%s, echo=%s)", sql_level_name, os.getenv("SQL_ECHO"))
 
 
+_LOG_MESSAGE_WARNED = False
+
+
 def log_message(message: str, level: int = 0, emoji: str = "", log_level: str = "info"):
+    """DEPRECATED: Используйте стандартный logger.{info,warning,error,debug}. Останется для совместимости.
+
+    Параметры:
+        message: текст.
+        level: индентация (legacy) — преобразуется в пробелы * 3.
+        emoji: добавляется префиксом.
+        log_level: какой метод вызвать.
     """
-    Удобная обертка для логирования сообщений в старом стиле.
-    """
+    global _LOG_MESSAGE_WARNED  # noqa: PLW0603
+    if not _LOG_MESSAGE_WARNED:
+        logging.getLogger(__name__).warning(
+            "log_message() устарел — переходите на стандартный logger.* (выводится один раз)"
+        )
+        _LOG_MESSAGE_WARNED = True
+
     indent = " " * (level * 3)
     prefix = f"{emoji} " if emoji else ""
     full_message = f"{indent}{prefix}{message}"
-    logger = logging.getLogger()
-
-    if log_level == "info":
+    logger = logging.getLogger(__name__)
+    lvl = log_level.lower()
+    if lvl == "info":
         logger.info(full_message)
-    elif log_level == "warning":
+    elif lvl == "warning":
         logger.warning(full_message)
-    elif log_level == "error":
+    elif lvl == "error":
         logger.error(full_message)
-    elif log_level == "debug":
+    elif lvl == "debug":
         logger.debug(full_message)
     else:
         logger.info(full_message)
@@ -175,3 +196,34 @@ def log_error(error: Exception, context: str = ""):
     logger = logging.getLogger()
     error_message = f"Произошла ошибка: {context}" if context else "Произошла ошибка"
     logger.error(error_message, exc_info=error)
+
+
+class ContextLoggerAdapter(logging.LoggerAdapter):
+    """Адаптер для добавления контекста (user_id, url, platform и т.п.).
+
+    Пример:
+        logger = get_logger(__name__, user_id=123)
+        logger.info("Начало загрузки", extra={'url': url})
+    """
+
+    def process(self, msg, kwargs):  # noqa: D401
+        if 'extra' in kwargs:
+            # Сливаем наш контекст и переданный
+            merged = {**self.extra, **kwargs['extra']}
+        else:
+            merged = self.extra
+        ctx_str = " ".join(f"{k}={v}" for k, v in merged.items() if v is not None)
+        if ctx_str:
+            msg = f"{msg} | {ctx_str}"
+        return msg, kwargs
+
+
+def get_logger(name: str, **context) -> logging.Logger:
+    """Возвращает адаптированный логгер с контекстом.
+
+    Если контекст не нужен — можно просто вызвать get_logger(__name__).
+    """
+    base = logging.getLogger(name)
+    if context:
+        return ContextLoggerAdapter(base, context)  # type: ignore[return-value]
+    return base

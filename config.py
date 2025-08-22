@@ -3,41 +3,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Базовые параметры бота
-# ---------------------------------------------------------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")          # Токен Telegram бота
-ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))  # Список ID админов (через запятую)
-PRIMARY_ADMIN_ID = int(os.getenv("ADMIN"))  # Главный админ (получает ошибки)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ---------------------------------------------------------------------------
-# Инфраструктура / внешние сервисы
-# ---------------------------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")                    # URL базы данных
+ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))
 
-# ---------------------------------------------------------------------------
-# Поддержка / коммуникация
-# ---------------------------------------------------------------------------
-SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))      # ID группы поддержки
-SUBSCRIBE_TOPIC_ID = int(os.getenv("SUBSCRIBE_TOPIC_ID"))  # ID темы (топика) для уведомлений
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ---------------------------------------------------------------------------
-# Оплата / магазин
-# ---------------------------------------------------------------------------
-SHOP_ID = int(os.getenv("SHOP_ID"))        # ID магазина YooKassa
-API_KEY = os.getenv("API_KEY")            # Секретный ключ API
-DOMAIN = os.getenv("DOMAIN")              # Базовый домен (для ссылок/вебхуков)
+SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))
+SUBSCRIBE_TOPIC_ID = int(os.getenv("SUBSCRIBE_TOPIC_ID"))
+NEW_USER_TOPIC_ID = int(os.getenv("NEW_USER_TOPIC_ID"))
 
-# ---------------------------------------------------------------------------
-# Загрузка файлов
-# ---------------------------------------------------------------------------
-DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
+SHOP_ID = int(os.getenv("SHOP_ID"))
+API_KEY = os.getenv("API_KEY")
 
-# ---------------------------------------------------------------------------
-# Лимиты
-# ---------------------------------------------------------------------------
+DOMAIN = os.getenv("DOMAIN")
+
 SUBSCRIPTION_YEARS_FOR_LIFETIME = 100
 SUBSCRIPTION_LIFETIME_DAYS = SUBSCRIPTION_YEARS_FOR_LIFETIME * 365
 
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
+BROADCAST_PROGRESS_UPDATE_INTERVAL = 7
+BROADCAST_PER_MESSAGE_DELAY = 0.2

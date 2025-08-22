@@ -1,7 +1,4 @@
 """Админ: управление тарифами (список, добавление, редактирование, удаление)."""
-
-import logging
-
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -11,15 +8,14 @@ from config import ADMINS
 from db.base import get_session
 from db.tariff import create_tariff, delete_tariff, get_all_tariffs, update_tariff
 from states.tariff import TariffStates
+import logging
 
-# Инициализация логгера для этого модуля
+
 logger = logging.getLogger(__name__)
 
-# Создание роутера и применение фильтра ко всем хендлерам (только для админов)
 router = Router()
 router.message.filter(F.from_user.id.in_(ADMINS))
 router.callback_query.filter(F.from_user.id.in_(ADMINS))
-
 
 @router.callback_query(F.data == "tariff_menu")
 async def tariff_menu_callback(callback: CallbackQuery) -> None:
@@ -92,9 +88,13 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Начинает процесс добавления нового тарифа с дружелюбной инструкцией и эмодзи.
     """
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅️ Отмена", callback_data="tariff_menu")
+    kb.adjust(1)
     await callback.message.edit_text(
-        "<b>➕ Добавление тарифа</b>\n\nПожалуйста, введите название нового тарифа (до 50 символов):\n\n<i>Для отмены — /cancel или кнопка 'Назад'.</i>",
-        parse_mode="HTML"
+        "<b>➕ Добавление тарифа</b>\n\n<code>Название, дни, цена</code> через запятую.\nПример: <code>1 год, 365, 349</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
     )
     await state.set_state(TariffStates.waiting_for_name)
     await callback.answer()
@@ -110,86 +110,50 @@ async def delete_tariff_handler(callback: CallbackQuery) -> None:
     logger.info(
         "Администратор %d удалил тариф с id %d", callback.from_user.id, tariff_id
     )
-    # Просто подтверждаем колбэк, чтобы убрать "часики"
     await callback.answer()
 
-    # Обновляем меню удаления, чтобы показать актуальный список
     await delete_tariff_menu_callback(callback)
 
 
 @router.message(TariffStates.waiting_for_name)
 async def process_tariff_name(message: Message, state: FSMContext) -> None:
-    """Обрабатывает название тарифа и запрашивает длительность."""
-    if not message.text or len(message.text) > 50:
+    """Обрабатывает название тарифа и запрашивает длительность, либо парсит всё одной строкой через запятую."""
+    raw = (message.text or "").strip()
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 3:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Отмена", callback_data="tariff_menu")
+        kb.adjust(1)
         await message.answer(
-            "❗️ <b>Название не должно быть пустым или длиннее 50 символов.</b>\nПожалуйста, введите корректное название:",
-            parse_mode="HTML"
+            "❗️ <b>Формат: название, дни, цена</b>\nПример: <code>1 год, 365, 349</code>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
         )
         return
-    await state.update_data(name=message.text.strip())
-    await message.answer(
-        "✅ Отлично! Теперь введите длительность тарифа в днях (целое число):",
-        parse_mode="HTML"
-    )
-    await state.set_state(TariffStates.waiting_for_days)
-
-
-@router.message(TariffStates.waiting_for_days)
-async def process_tariff_days(message: Message, state: FSMContext) -> None:
-    """Обрабатывает длительность тарифа и запрашивает цену."""
-    if not message.text.isdigit() or not 0 < int(message.text) < 10000:
+    name, days, price = parts
+    if not name or len(name) > 50 or not days.isdigit() or not price.isdigit():
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Отмена", callback_data="tariff_menu")
+        kb.adjust(1)
         await message.answer(
-            "❗️ <b>Пожалуйста, введите корректное количество дней (целое число от 1 до 9999):</b>",
-            parse_mode="HTML"
+            "❗️ <b>Проверьте формат:</b> название (до 50), дни (целое), цена (целое)\nПример: <code>1 год, 365, 349</code>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
         )
         return
-    await state.update_data(days=int(message.text))
-    await message.answer(
-        "✅ Отлично! Теперь введите цену тарифа в рублях (целое число, без копеек, например 199):",
-        parse_mode="HTML"
-    )
-    await state.set_state(TariffStates.waiting_for_price)
-
-
-@router.message(TariffStates.waiting_for_price)
-async def process_tariff_price(message: Message, state: FSMContext) -> None:
-    """Обрабатывает ввод цены и создаёт новый тариф."""
-    if not (message.text and message.text.isdigit() and 0 < int(message.text) < 1_000_000):
-        await message.answer(
-            "❗️ <b>Введите корректную ЦЕЛУЮ цену в рублях (1 .. 999999):</b>",
-            parse_mode="HTML"
-        )
-        return
-    price = int(message.text)
-
-    data = await state.get_data()
-    name = data["name"]
-    days = data["days"]
-
     async with get_session() as session:
-        await create_tariff(session, name=name, price=price, duration_days=days)
-
+        await create_tariff(session, name=name, price=int(price), duration_days=int(days))
     logger.info(
-        "Админ %d создал новый тариф: %s, %d дней, %d RUB",
-        message.from_user.id,
-        name,
-        days,
-        price,
+        "Админ %d создал новый тариф (одной строкой): %s, %s дней, %s RUB",
+        message.from_user.id, name, days, price
     )
-
     await message.answer(
-        f"✅ <b>Тариф «{name}» успешно добавлен!</b>\n"
-        f"Длительность: <b>{days}</b> дней\n"
-        f"Цена: <b>{price} ₽</b>",
+        f"✅ <b>Тариф «{name}» успешно добавлен!</b>\nДлительность: <b>{days}</b> дней\nЦена: <b>{price} ₽</b>",
         parse_mode="HTML"
     )
     await state.clear()
-
-    # Отображаем главное меню тарифов
     await tariff_menu(message=message)
 
-
-# ---------------- Редактирование тарифов ----------------
 @router.callback_query(F.data == "edit_tariff_pick")
 async def edit_tariff_pick(callback: CallbackQuery, state: FSMContext) -> None:
     async with get_session() as session:
@@ -209,7 +173,6 @@ async def edit_tariff_pick(callback: CallbackQuery, state: FSMContext) -> None:
     )
     await callback.answer()
 
-
 @router.callback_query(F.data.startswith("edit_tariff:"))
 async def edit_tariff_field_select(callback: CallbackQuery, state: FSMContext) -> None:
     tariff_id = int(callback.data.split(":", 1)[1])
@@ -227,7 +190,6 @@ async def edit_tariff_field_select(callback: CallbackQuery, state: FSMContext) -
     )
     await callback.answer()
 
-
 @router.callback_query(F.data.startswith("edit_field:"))
 async def edit_tariff_start(callback: CallbackQuery, state: FSMContext) -> None:
     field = callback.data.split(":", 1)[1]
@@ -240,7 +202,6 @@ async def edit_tariff_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(TariffStates.editing_new_value)
     await callback.message.edit_text(prompt_map[field], parse_mode="HTML")
     await callback.answer()
-
 
 @router.message(TariffStates.editing_new_value)
 async def process_edit_value(message: Message, state: FSMContext) -> None:
