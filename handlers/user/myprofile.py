@@ -1,7 +1,6 @@
 """Профиль пользователя: показ статуса подписки и базовой информации."""
 
 from datetime import datetime
-import logging
 from aiogram import Router, types
 from aiogram.types import CallbackQuery
 from db.base import get_session
@@ -19,7 +18,6 @@ def _build_profile_keyboard() -> types.InlineKeyboardMarkup:
             [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="profile")],
         ]
     )
-
 
 def _format_subscription_status(expire_at: datetime | None) -> str:
     """Возвращает человекочитаемый статус подписки."""
@@ -61,7 +59,6 @@ def _build_referral_text(ref_count: int, level: int, to_next: str, progress_bar:
         f"\n{to_next}\n"
     )
 
-
 @router.callback_query(lambda c: c.data == "myprofile")
 async def show_profile(callback: CallbackQuery) -> None:
     """Показывает профиль пользователя (кнопка myprofile)."""
@@ -90,7 +87,6 @@ async def show_profile(callback: CallbackQuery) -> None:
         else:
             to_next = "Максимальный уровень!"
             progress_bar = ""
-
 
     status = _format_subscription_status(expire_at)
     text = _build_profile_text(user_id, name, username, status)

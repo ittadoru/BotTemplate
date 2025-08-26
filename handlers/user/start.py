@@ -85,13 +85,23 @@ async def cmd_start(message: types.Message) -> None:
         )
         await log_user_activity(session, user_id)
         if is_new:
+            logger.info("👤 [START] Новый пользователь %s (id=%s, referrer_id=%s) зарегистрирован", username_raw, user_id, referrer_id)
+            await message.bot.send_message(
+                SUPPORT_GROUP_ID,
+                text=f"👤 Новый пользователь\n\nID: {user_id}\nИмя: {username_raw}\nРеферал: {referrer_id}",
+                message_thread_id=NEW_USER_TOPIC_ID
+            )
+            
             promo_code = await _generate_unique_promocode(session)
-            # --- Бонус за реферала: +1 день подписки рефереру ---
+            # --- Бонус за реферала: +3 дня подписки рефереру ---
             if referrer_id:
                 try:
-                    await message.answer("Ты получил бонус за реферала! (1 день подписки)")
-                    await add_subscriber_with_duration(session, referrer_id, 1)
-                    logger.info(f"🎁 [START] Начислен бонус (+1 день) подписки рефереру {referrer_id} за нового пользователя {user_id}")
+                    await message.answer("Ты получил бонус за реферала! (3 дня подписки)")
+                    await add_subscriber_with_duration(session, user_id, 3)
+
+                    await message.bot.send_message(referrer_id, "Ты получил бонус за реферала! (3 дня подписки)")
+                    await add_subscriber_with_duration(session, referrer_id, 3)
+                    logger.info(f"🎁 [START] Начислен бонус (+3 дня) подписки рефереру {referrer_id} за нового пользователя {user_id}")
                     # --- Проверка уровня реферера и выдача VIP/бессрочной подписки ---
                     ref_count, level, _ = await get_referral_stats(session, referrer_id)
                     if level == 5:
@@ -134,14 +144,6 @@ async def cmd_start(message: types.Message) -> None:
             promo_text = ""
     else:
         promo_text = ""
-
-    if is_new:
-        logger.info("👤 [START] Новый пользователь %s (id=%s, referrer_id=%s) зарегистрирован", username_raw, user_id, referrer_id)
-        await message.bot.send_message(
-            SUPPORT_GROUP_ID,
-            text=f"👤 Новый пользователь\n\nID: {user_id}\nИмя: {username_raw}\nРеферал: {referrer_id}",
-            message_thread_id=NEW_USER_TOPIC_ID
-        )
 
     await message.answer(
         (
